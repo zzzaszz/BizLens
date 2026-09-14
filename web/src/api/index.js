@@ -63,6 +63,11 @@ export function aiAgentDelete(id) {
   return request({url: `/ai/agent/${id}`, method: 'delete'})
 }
 
+/** 拉取厂商可用模型列表（后端失败时回退预置列表，始终 200） */
+export function aiAgentModels(data) {
+  return request({url: '/ai/agent/models', method: 'post', data})
+}
+
 // ============ 代码项目 ==========
 export function codeProjectList() {
   return request({url: '/ai/project/list', method: 'get'})

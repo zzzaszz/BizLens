@@ -33,7 +33,7 @@ public class AiAgentEntity implements Serializable {
     private Integer maxtokens;
     /** 是否启用 1启用 0停用 */
     private Integer enabled;
-    /** 1系统预置 0用户自建 */
+    /** 历史字段：1系统预置 0用户自建。当前所有角色均由项目创建，恒为 0。 */
     private Integer issystem;
     /** 头像URL或emoji */
     private String avatar;

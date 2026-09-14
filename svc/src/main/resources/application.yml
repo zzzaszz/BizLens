@@ -23,10 +23,6 @@ mybatis:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
     map-underscore-to-camel-case: true
   type-aliases-package: zzz.service.**.domain
-pagehelper:
-  helper-dialect: postgresql
-  reasonable: true
-  support-methods-arguments: true
 
 # ============ AI 对话配置（密钥走环境变量，不提交到 Git） ============
 ai:
@@ -34,4 +30,22 @@ ai:
   deepseek:
     api-key: ${DEEPSEEK_API_KEY:}
     base-url: https://api.deepseek.com
-    model: deepseek-chat
+    # 角色未指定模型时的兜底模型。
+    # 注意：deepseek-chat / deepseek-reasoner 两个别名已于 2026-07-24 下线，调用会直接报错，勿再使用。
+    model: deepseek-flash
+  # 模型下拉的兜底列表：仅当厂商 /models 调用失败（无 Key、Key 失效、网关不通）时才展示。
+  # 模型名迭代很快，改名只需改这里、不需要重新编译；未列出的厂商不给兜底（下拉为空但可手输）。
+  # 最近一次人工核对：2026-09-14
+  preset-models:
+    deepseek:
+      - deepseek-flash
+      - deepseek-v4-pro
+    openai:
+      - gpt-6-astra
+      - gpt-5.6-sol
+      - gpt-5.6-terra
+      - gpt-5.6-luna
+    qwen:
+      - qwen-max
+      - qwen-plus
+      - qwen-turbo

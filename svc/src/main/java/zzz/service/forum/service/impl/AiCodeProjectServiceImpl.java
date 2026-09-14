@@ -29,6 +29,16 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
     }
 
     @Override
+    public AiCodeProjectEntity getById(Long projectId) {
+        return projectId == null ? null : projectMapper.getById(projectId);
+    }
+
+    @Override
+    public AiCodeProjectEntity getOwned(Long userId, Long projectId) {
+        return requireOwner(userId, projectId);
+    }
+
+    @Override
     public AiCodeProjectEntity create(Long userId, AiCodeProjectRequest request) {
         validate(request);
         AiCodeProjectEntity entity = new AiCodeProjectEntity();

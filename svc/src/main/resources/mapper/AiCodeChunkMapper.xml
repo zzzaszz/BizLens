@@ -1,10 +1,61 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="zzz.service.forum.mapper.AiCodeChunkMapper">
+
     <insert id="insert" parameterType="zzz.service.forum.domain.AiCodeChunkEntity">
         INSERT INTO ai_code_chunk
-        (id, document_id, chunk_type, symbol_name, business_summary, metadata, created_at)
-        VALUES (#{id}, #{documentId}, #{chunkType}, #{symbolName}, #{businessSummary},
+        (id, document_id, chunk_type, symbol_name, business_summary, source_snippet, metadata, created_at)
+        VALUES (#{id}, #{documentId}, #{chunkType}, #{symbolName}, #{businessSummary}, #{sourceSnippet},
                 CAST(#{metadata} AS jsonb), #{createdAt})
     </insert>
+
+    <resultMap id="hitMap" type="zzz.service.forum.domain.dto.AiCodeChunkHit">
+        <result property="path" column="path"/>
+        <result property="language" column="language"/>
+        <result property="chunkType" column="chunk_type"/>
+        <result property="symbolName" column="symbol_name"/>
+        <result property="businessSummary" column="business_summary"/>
+        <result property="sourceSnippet" column="source_snippet"/>
+        <result property="startLine" column="start_line"/>
+        <result property="endLine" column="end_line"/>
+        <result property="score" column="score"/>
+    </resultMap>
+
+    <!--
+      按项目 + 关键词召回切片。
+      命中权重：符号名 5 > 文件路径 2 > 源码正文 1——查询改写产出的候选标识符
+      大多落在类名/方法名/path 上，源码正文匹配只作为补充信号。
+      只返回带 source_snippet 的切片：没有源码就喂不了模型，返回也是噪声。
+      调用方必须保证 keywords 非空，否则下面的 foreach 会生成空条件导致 SQL 语法错误。
+    -->
+    <select id="searchByKeywords" resultMap="hitMap">
+        SELECT d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0)   AS end_line,
+               (
+               <foreach collection="keywords" item="kw" separator="+">
+                   (CASE WHEN c.symbol_name ILIKE '%' || #{kw} || '%' THEN 5 ELSE 0 END
+                   + CASE WHEN d.path       ILIKE '%' || #{kw} || '%' THEN 2 ELSE 0 END
+                   + CASE WHEN c.source_snippet ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END)
+               </foreach>
+               ) AS score
+        FROM ai_code_chunk c
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE d.project_id = #{projectId}
+          AND c.source_snippet IS NOT NULL
+          AND (
+               <foreach collection="keywords" item="kw" separator="OR">
+                   c.symbol_name ILIKE '%' || #{kw} || '%'
+                   OR d.path       ILIKE '%' || #{kw} || '%'
+                   OR c.source_snippet ILIKE '%' || #{kw} || '%'
+               </foreach>
+          )
+        ORDER BY score DESC, length(c.source_snippet) ASC
+        LIMIT #{limit}
+    </select>
 </mapper>

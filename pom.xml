@@ -31,7 +31,6 @@
         <spring-boot.version>2.5.3</spring-boot.version>
 
         <!-- 依赖版本管理 -->
-        <pagehelper.version>1.4.1</pagehelper.version>
         <postgresql.version>42.7.4</postgresql.version>
         <mybatisplus.version>3.5.5</mybatisplus.version>
         <useragent.version>1.20</useragent.version>
@@ -73,13 +72,6 @@
                 <version>${spring-boot.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-
-            <!-- PageHelper -->
-            <dependency>
-                <groupId>com.github.pagehelper</groupId>
-                <artifactId>pagehelper-spring-boot-starter</artifactId>
-                <version>${pagehelper.version}</version>
             </dependency>
 
             <!-- PostgreSQL -->

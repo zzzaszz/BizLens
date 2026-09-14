@@ -1,6 +1,9 @@
--- BizLens AI PostgreSQL schema
+-- BizLens AI PostgreSQL schema（全新库建库脚本）
 -- 用法：psql "$DATABASE_URL" -f schema-postgresql.sql
 -- 脚本可重复执行，不包含业务数据清理。
+--
+-- 本文件只负责「从零建库」：所有表、外键、索引一次建成。
+-- 已有库的结构变更请执行同目录下的 migration-*.sql，不要指望重复执行本文件来升级。
 
 CREATE TABLE IF NOT EXISTS "User" (
     Id              BIGINT PRIMARY KEY,
@@ -21,11 +24,31 @@ CREATE TABLE IF NOT EXISTS "User" (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username ON "User" (Username);
 CREATE INDEX IF NOT EXISTS idx_user_status ON "User" (Status, Deleted);
 
--- 角色由代码项目创建：一个项目最多一个角色（ProjectId 唯一，约束在文件末尾的升级块中补齐）。
+-- 代码知识库：只保存索引、摘要和元数据，源码默认不落库。
+-- 排在 "AiAgent" 之前，因为角色要外键引用它。
+CREATE TABLE IF NOT EXISTS ai_code_project (
+    id              BIGINT PRIMARY KEY,
+    name            VARCHAR(128) NOT NULL,
+    git_url         VARCHAR(512) NOT NULL,
+    git_branch      VARCHAR(128) NOT NULL DEFAULT 'main',
+    git_commit      VARCHAR(64),
+    credential_ref  VARCHAR(256),
+    status          VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    -- 最近一次索引失败的原因（已截断、已抹掉可能出现在 Git 输出里的 URL 凭据）；成功时清空
+    last_error      TEXT,
+    last_indexed_at TIMESTAMP,
+    created_by      BIGINT REFERENCES "User" (id) ON DELETE SET NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_code_project_status ON ai_code_project (status, updated_at DESC);
+
+-- AI 角色：由代码项目创建，一个项目最多一个角色（ProjectId 唯一），删除项目级联删除角色。
+-- IsSystem 为历史字段（原「系统预置角色」），当前角色均由项目创建，恒为 0。
 CREATE TABLE IF NOT EXISTS "AiAgent" (
     "Id"           BIGINT PRIMARY KEY,
     "UserId"       BIGINT,
-    "ProjectId"    BIGINT,
+    "ProjectId"    BIGINT NOT NULL,
     "Name"         VARCHAR(64) NOT NULL,
     "Code"         VARCHAR(32),
     "Model"        VARCHAR(64),
@@ -40,10 +63,12 @@ CREATE TABLE IF NOT EXISTS "AiAgent" (
     "ApiKeyEnc"    VARCHAR(512),
     "CreatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE SET NULL
+    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE SET NULL,
+    CONSTRAINT fk_ai_agent_project FOREIGN KEY ("ProjectId") REFERENCES ai_code_project (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_ai_agent_user ON "AiAgent" ("UserId", "Enabled");
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_code_user ON "AiAgent" ("UserId", "Code") WHERE "Code" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_project ON "AiAgent" ("ProjectId");
 
 CREATE TABLE IF NOT EXISTS "AiConversation" (
     "Id"             BIGINT PRIMARY KEY,
@@ -69,38 +94,6 @@ CREATE TABLE IF NOT EXISTS "AiChatMessage" (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_message_conversation ON "AiChatMessage" ("ConversationId", "CreateTime");
 
--- 代码知识库：只保存索引、摘要和元数据，源码默认不落库。
-CREATE TABLE IF NOT EXISTS ai_code_project (
-    id              BIGINT PRIMARY KEY,
-    name            VARCHAR(128) NOT NULL,
-    git_url         VARCHAR(512) NOT NULL,
-    git_branch      VARCHAR(128) NOT NULL DEFAULT 'main',
-    git_commit      VARCHAR(64),
-    credential_ref  VARCHAR(256),
-    status          VARCHAR(32) NOT NULL DEFAULT 'PENDING',
-    last_indexed_at TIMESTAMP,
-    created_by      BIGINT REFERENCES "User" (id) ON DELETE SET NULL,
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_code_project_status ON ai_code_project (status, updated_at DESC);
-
--- ============ AiAgent ← → ai_code_project 一对一绑定（升级块，可重复执行） ============
--- 业务规则：角色必须由代码项目创建，一个项目最多创建一个角色，删除项目级联删除角色。
--- 旧版本存在"无归属的系统预置角色"，在新模型下既无项目也无 Key、无法参与对话，先清理再加约束。
-ALTER TABLE "AiAgent" ADD COLUMN IF NOT EXISTS "ProjectId" BIGINT;
-DELETE FROM "AiAgent" WHERE "Id" = 1 AND "UserId" IS NULL;
-DELETE FROM "AiAgent" WHERE "ProjectId" IS NULL;
-
-ALTER TABLE "AiAgent" DROP CONSTRAINT IF EXISTS fk_ai_agent_project;
-ALTER TABLE "AiAgent" ADD CONSTRAINT fk_ai_agent_project
-    FOREIGN KEY ("ProjectId") REFERENCES ai_code_project (id) ON DELETE CASCADE;
-
-ALTER TABLE "AiAgent" ALTER COLUMN "ProjectId" SET NOT NULL;
-
-DROP INDEX IF EXISTS uk_ai_agent_project;
-CREATE UNIQUE INDEX uk_ai_agent_project ON "AiAgent" ("ProjectId");
-
 CREATE TABLE IF NOT EXISTS ai_code_document (
     id              BIGINT PRIMARY KEY,
     project_id      BIGINT NOT NULL REFERENCES ai_code_project (id) ON DELETE CASCADE,
@@ -117,12 +110,15 @@ CREATE TABLE IF NOT EXISTS ai_code_document (
 );
 CREATE INDEX IF NOT EXISTS idx_code_document_project ON ai_code_document (project_id, language);
 
+-- source_snippet：切片对应的源码原文（已按长度预算截断）。
+-- 对话时按关键词召回后注入模型用于理解业务逻辑；回答侧由 AiSafetyGuard 拦截源码输出。
 CREATE TABLE IF NOT EXISTS ai_code_chunk (
     id              BIGINT PRIMARY KEY,
     document_id     BIGINT NOT NULL REFERENCES ai_code_document (id) ON DELETE CASCADE,
     chunk_type      VARCHAR(32) NOT NULL,
     symbol_name     VARCHAR(256),
     business_summary TEXT,
+    source_snippet  TEXT,
     embedding       JSONB,
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -154,4 +150,4 @@ CREATE TABLE IF NOT EXISTS ai_security_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_security_audit_user_time ON ai_security_audit (user_id, created_at DESC);
 
--- 说明：不再预置系统角色。所有角色都必须由代码项目创建，因此没有可脱离项目的初始数据。
+-- 说明：不预置任何角色。角色必须由代码项目创建，因此没有可脱离项目的初始数据。

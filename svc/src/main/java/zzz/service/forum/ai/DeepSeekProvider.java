@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,8 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +40,7 @@ public class DeepSeekProvider implements AiProvider {
     private String apiKey;
     @Value("${ai.deepseek.base-url:https://api.deepseek.com}")
     private String baseUrl;
-    @Value("${ai.deepseek.model:deepseek-chat}")
+    @Value("${ai.deepseek.model:deepseek-flash}")
     private String model;
 
     private final RestTemplate restTemplate = new RestTemplate();
@@ -165,6 +168,67 @@ public class DeepSeekProvider implements AiProvider {
     @Override
     public String providerName() {
         return "deepseek";
+    }
+
+    /**
+     * 拉取可用模型：GET {baseUrl}/models，解析 OpenAI 兼容响应里的 data[].id。
+     * 任何异常都吞掉返回空列表——这只是给下拉框取选项，不该阻断配置表单。
+     */
+    @Override
+    public List<String> listModels(String baseUrl, String apiKey) {
+        // 不满足前提就不发请求，但要留痕，否则排查时只看到"下拉是预置的"却不知为何
+        if (isBlank(baseUrl) || isBlank(apiKey)) {
+            log.info("未转发厂商模型列表接口：baseUrl={}, apiKeyPresent={}", baseUrl, !isBlank(apiKey));
+            return Collections.emptyList();
+        }
+
+        String url = trimTrailingSlash(baseUrl) + "/models";
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(apiKey);
+
+            // 日志只输出 URL / 响应体 / 取用结果，绝不打印 apiKey
+            log.info("转发厂商模型列表接口：GET {}", url);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            Map<?, ?> respBody = resp.getBody();
+            log.info("厂商模型列表接口返回：status={}, body={}", resp.getStatusCodeValue(), respBody);
+
+            if (respBody == null) {
+                log.warn("返回体为空，取用数据：[]");
+                return Collections.emptyList();
+            }
+            List<?> data = (List<?>) respBody.get("data");
+            if (data == null || data.isEmpty()) {
+                log.warn("返回体中没有 data 字段，取用数据：[]");
+                return Collections.emptyList();
+            }
+            List<String> models = new ArrayList<>();
+            for (Object item : data) {
+                if (!(item instanceof Map)) {
+                    continue;
+                }
+                Object id = ((Map<?, ?>) item).get("id");
+                if (id != null && !id.toString().isEmpty()) {
+                    models.add(id.toString());
+                }
+            }
+            Collections.sort(models);
+            log.info("取用数据（data[].id）：{}", models);
+            return models;
+        } catch (Exception e) {
+            log.warn("调用厂商模型列表接口失败：url={}, err={}", url, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private String trimTrailingSlash(String value) {
+        String v = value.trim();
+        return v.endsWith("/") ? v.substring(0, v.length() - 1) : v;
     }
 
     private String resolveModel(AiRequest request) {

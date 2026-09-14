@@ -7,74 +7,118 @@ export default { name: 'AiAgentManage' }
     <div class="page-head">
       <div>
         <h2>AI 角色</h2>
-        <p>系统预置角色对所有用户开放，你也可以创建自己的专属角色</p>
+        <p>角色由代码项目创建——一个项目只能创建一个角色，且必须配置 API Key 才能发起对话</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">新建角色</el-button>
+      <el-button type="primary" :icon="Plus" :disabled="!availableProjects.length" @click="openCreate">
+        {{ availableProjects.length ? '新建角色' : '请先创建代码项目' }}
+      </el-button>
     </div>
 
-    <el-tabs v-model="tab">
-      <el-tab-pane label="系统角色" name="system">
-        <div class="agent-grid">
-          <div v-for="a in systemAgents" :key="a.id" class="agent-card">
-            <div class="ac-avatar" :style="{ background: a.avatar || defaultGradient }">{{ (a.name || '?')[0] }}</div>
-            <div class="ac-info">
-              <div class="ac-name">{{ a.name }} <el-tag size="small" type="info" effect="plain">系统</el-tag></div>
-              <div class="ac-desc">{{ (a.systemprompt || '通用 AI 助手').slice(0, 60) }}</div>
-            </div>
-            <el-button size="small" :icon="ChatDotRound" @click="startChat(a)">对话</el-button>
+    <el-table
+      v-loading="loading"
+      :data="agents"
+      border
+      empty-text="暂无角色。请先在「代码项目」登记项目，再回到此处为项目创建角色"
+    >
+      <el-table-column label="角色" min-width="200">
+        <template #default="{ row }">
+          <div class="agent-cell">
+            <span class="agent-mark" :style="{ background: row.avatar || defaultMark }">{{ (row.name || '?').charAt(0) }}</span>
+            <span>{{ row.name }}</span>
           </div>
-          <el-empty v-if="!systemAgents.length" description="暂无系统角色" :image-size="60" />
-        </div>
-      </el-tab-pane>
-
-      <el-tab-pane label="我的角色" name="mine">
-        <div class="agent-grid">
-          <div v-for="a in myAgents" :key="a.id" class="agent-card">
-            <div class="ac-avatar" :style="{ background: a.avatar || defaultGradient }">{{ (a.name || '?')[0] }}</div>
-            <div class="ac-info">
-              <div class="ac-name">{{ a.name }}</div>
-              <div class="ac-desc">{{ (a.systemprompt || '通用 AI 助手').slice(0, 60) }}</div>
-              <div class="ac-actions">
-                <el-button link size="small" :icon="Edit" @click="openEdit(a)">编辑</el-button>
-                <el-button link size="small" type="danger" :icon="Delete" @click="removeAgent(a)">删除</el-button>
-                <el-button link size="small" type="primary" :icon="ChatDotRound" @click="startChat(a)">对话</el-button>
-              </div>
-            </div>
-          </div>
-          <el-empty v-if="!myAgents.length" description="还没有自己的角色，点击右上角新建" :image-size="60" />
-        </div>
-      </el-tab-pane>
-    </el-tabs>
+        </template>
+      </el-table-column>
+      <el-table-column label="所属项目" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">{{ projectName(row.projectid) }}</template>
+      </el-table-column>
+      <el-table-column label="模型" width="150">
+        <template #default="{ row }">{{ row.model || '默认' }}</template>
+      </el-table-column>
+      <el-table-column label="API Key" width="120">
+        <template #default="{ row }">
+          <el-tag :type="row.apikeyenc ? 'success' : 'danger'" effect="plain" size="small">
+            {{ row.apikeyenc ? '已配置' : '未配置' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="200" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="startChat(row)">对话</el-button>
+          <el-button link @click="openEdit(row)">编辑</el-button>
+          <el-button link type="danger" @click="removeAgent(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
 
     <!-- 创建 / 编辑角色弹窗 -->
-    <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="520px" :append-to-body="true">
-      <el-form label-width="80px">
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="角色名称，如 英语老师" maxlength="32" />
+    <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" :append-to-body="true">
+      <el-form label-width="90px">
+        <el-form-item label="所属项目" required>
+          <el-select v-if="!form.id" v-model="form.projectId" placeholder="选择代码项目" style="width:100%">
+            <el-option v-for="p in availableProjects" :key="p.id" :label="p.name" :value="p.id">
+              <span>{{ p.name }}</span>
+              <span class="opt-meta">{{ projectStatusText(p.status) }}</span>
+            </el-option>
+          </el-select>
+          <el-input v-else :model-value="projectName(form.projectId)" disabled />
         </el-form-item>
-        <el-form-item label="头像">
-          <el-input v-model="form.avatar" placeholder="可填图标或图片 URL，留空自动取色">
+
+        <el-form-item label="名称" required>
+          <el-input v-model="form.name" placeholder="角色名称，如 订单业务助手" maxlength="32" />
+        </el-form-item>
+
+        <el-form-item label="标识色">
+          <el-input v-model="form.avatar" placeholder="账号列表色块，填 CSS 颜色，留空用默认色">
             <template #prefix>
-              <span class="avatar-preview" :style="{ background: form.avatar || defaultGradient }">{{ (form.name || '?')[0] }}</span>
+              <span class="mark-preview" :style="{ background: form.avatar || defaultMark }">{{ (form.name || '?').charAt(0) }}</span>
             </template>
           </el-input>
         </el-form-item>
+
         <el-form-item label="角色设定">
           <el-input v-model="form.systemPrompt" type="textarea" :rows="4"
-            placeholder="系统提示词，如：你是一名专业英语老师，请用简单英语和我对话并纠正语法错误" />
+            placeholder="系统提示词，如：你是订单业务助手，只解释业务规则与处理流程，不输出源代码、SQL 和配置" />
         </el-form-item>
-        <el-form-item label="模型">
-          <el-select v-model="form.model" placeholder="留空使用系统默认模型" clearable style="width:100%">
-            <el-option label="deepseek-chat" value="deepseek-chat" />
-            <el-option label="gpt-4o-mini" value="gpt-4o-mini" />
-            <el-option label="qwen-plus" value="qwen-plus" />
+
+        <el-form-item label="厂商" required>
+          <el-select v-model="form.provider" style="width:100%" @change="onProviderChange">
+            <el-option v-for="p in PROVIDERS" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="温度">
-          <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="2" />
+
+        <el-form-item label="接口地址">
+          <el-input v-model="form.apiBaseUrl" :placeholder="form.provider === 'custom' ? '必填，例如 https://your-gateway/v1' : '留空使用该厂商默认地址'" />
         </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="form.apiKey" placeholder="留空使用系统默认 Key" show-password clearable />
+
+        <el-form-item label="模型">
+          <div class="model-row">
+            <el-select
+              v-model="form.model"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              class="model-select"
+              placeholder="选择或直接输入模型名"
+            >
+              <el-option v-for="m in modelSelectOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+            <el-button link type="primary" :loading="loadingModels" @click="fetchModels">获取模型</el-button>
+          </div>
+          <p v-if="modelSource" class="model-hint" :class="modelSource === 'PROVIDER' ? 'ok' : 'warn'">
+            <template v-if="modelSource === 'PROVIDER'">已从厂商接口获取 {{ modelOptions.length }} 个模型</template>
+            <template v-else-if="modelSource === 'PRESET'">{{ modelHint }}</template>
+            <template v-else>未获取到模型列表，请手动输入模型名</template>
+          </p>
+        </el-form-item>
+
+        <el-form-item label="API Key" required>
+          <el-input v-model="form.apiKey" type="password" show-password clearable
+            :placeholder="form.id ? '留空表示不修改' : '模型服务 API Key，未配置无法发起对话'" />
+        </el-form-item>
+
+        <el-form-item label="采样温度">
+          <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="2" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -87,57 +131,170 @@ export default { name: 'AiAgentManage' }
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, ChatDotRound } from '@element-plus/icons-vue'
-import { aiAgentList, aiAgentCreate, aiAgentUpdate, aiAgentDelete, aiCreateConversation } from '@/api'
+import { Plus } from '@element-plus/icons-vue'
+import {
+  aiAgentList, aiAgentCreate, aiAgentUpdate, aiAgentDelete, aiAgentModels,
+  aiCreateConversation, codeProjectList
+} from '@/api'
 
+const route = useRoute()
 const router = useRouter()
-const tab = ref('system')
+const loading = ref(false)
 const agents = ref([])
+const projects = ref([])
 const formVisible = ref(false)
 const saving = ref(false)
-const defaultGradient = 'linear-gradient(135deg,#7C3AED,#3B82F6)'
+const loadingModels = ref(false)
+const modelOptions = ref([])
+/** 模型来源：PROVIDER=厂商接口 / PRESET=预置兜底 / EMPTY=没拿到，用于提示用户 */
+const modelSource = ref(null)
+const modelHint = ref('')
+const defaultMark = '#2563EB'
 const form = ref(emptyForm())
 
+/** 厂商选项；baseUrl 在切换厂商时自动带入「接口地址」，custom 留空强制手填 */
+const PROVIDERS = [
+  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com' },
+  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+  { value: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { value: 'custom', label: '自定义（OpenAI 兼容）', baseUrl: '' }
+]
+
 function emptyForm() {
-  return { id: null, name: '', avatar: '', systemPrompt: '', model: '', temperature: 0.7, apiKey: '' }
+  return {
+    id: null, projectId: null, name: '', avatar: '', systemPrompt: '',
+    provider: 'deepseek', apiBaseUrl: 'https://api.deepseek.com',
+    model: '', temperature: 0.7, apiKey: ''
+  }
 }
 
-const systemAgents = computed(() => agents.value.filter(a => a.issystem === 1))
-const myAgents = computed(() => agents.value.filter(a => a.issystem !== 1))
+/** 下拉选项 = 接口返回的列表；若当前已选模型不在其中（历史值/手输），补到最前面 */
+const modelSelectOptions = computed(() => {
+  const list = [...modelOptions.value]
+  const current = form.value.model
+  if (current && !list.includes(current)) list.unshift(current)
+  return list
+})
 
-async function loadAgents() {
+/** 已绑定角色的项目 ID —— 一个项目只能创建一个角色 */
+const usedProjectIds = computed(() => new Set(agents.value.map(a => a.projectid)))
+
+/** 还能创建角色的项目 */
+const availableProjects = computed(() => projects.value.filter(p => !usedProjectIds.value.has(p.id)))
+
+function projectName(projectId) {
+  const p = projects.value.find(x => x.id === projectId)
+  return p ? p.name : '—'
+}
+
+function projectStatusText(status) {
+  return ({ PENDING: '待索引', QUEUED: '排队中', INDEXING: '索引中', READY: '已就绪', FAILED: '索引失败' })[status] || status || '未知'
+}
+
+async function loadAll() {
+  loading.value = true
   try {
-    const res = await aiAgentList()
-    if (res.code === 200) agents.value = res.data || []
-  } catch { /* 忽略 */ }
+    const [agentRes, projectRes] = await Promise.all([aiAgentList(), codeProjectList()])
+    if (agentRes.code === 200) agents.value = agentRes.data || []
+    if (projectRes.code === 200) projects.value = projectRes.data || []
+  } catch {
+    /* 错误提示由请求拦截器统一处理 */
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 切换厂商：自动带出该厂商默认接口地址，并重新拉一次模型列表 */
+function onProviderChange(value) {
+  const provider = PROVIDERS.find(p => p.value === value)
+  form.value.apiBaseUrl = provider ? provider.baseUrl : ''
+  fetchModels()
+}
+
+/**
+ * 拉取模型列表：后端先真调厂商 /models，失败回退预置；始终 200，不阻断表单。
+ * 返回体带 source，用来告诉用户拿到的是真实列表还是预置兜底——不做静默回退。
+ */
+async function fetchModels() {
+  loadingModels.value = true
+  try {
+    const res = await aiAgentModels({
+      provider: form.value.provider || 'deepseek',
+      apiBaseUrl: form.value.apiBaseUrl || null,
+      apiKey: form.value.apiKey || null,
+      agentId: form.value.id || null
+    })
+    if (res.code === 200) {
+      const data = res.data || {}
+      modelOptions.value = data.models || []
+      modelSource.value = data.source || null
+      modelHint.value = data.message || ''
+    }
+  } catch {
+    /* 提示由请求拦截器统一处理；下拉仍可手动输入 */
+    modelSource.value = null
+    modelHint.value = ''
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+function resetModelState() {
+  modelOptions.value = []
+  modelSource.value = null
+  modelHint.value = ''
 }
 
 function openCreate() {
   form.value = emptyForm()
+  resetModelState()
+  // 从「代码项目」页带着 projectId 跳过来时直接预选该项目
+  const fromQuery = Number(route.query.projectId)
+  if (fromQuery && availableProjects.value.some(p => p.id === fromQuery)) {
+    form.value.projectId = fromQuery
+  } else if (availableProjects.value.length === 1) {
+    // 只剩一个可选项目时也直接预选，少点一次
+    form.value.projectId = availableProjects.value[0].id
+  }
   formVisible.value = true
+  // 此时还没有 Key，后端会回退预置列表，先把下拉填上
+  fetchModels()
 }
 
 function openEdit(a) {
   form.value = {
-    id: a.id, name: a.name, avatar: a.avatar || '',
+    id: a.id, projectId: a.projectid, name: a.name, avatar: a.avatar || '',
     systemPrompt: a.systemprompt || '', model: a.model || '',
+    provider: a.provider || 'deepseek', apiBaseUrl: a.apibaseurl || '',
     temperature: a.temperature != null ? Number(a.temperature) : 0.7, apiKey: ''
   }
+  resetModelState()
   formVisible.value = true
+  // 编辑时表单不回传 Key，后端改用库里已存的 Key 去拉
+  fetchModels()
 }
 
 async function saveAgent() {
+  if (!form.value.id && !form.value.projectId) {
+    ElMessage.warning('请选择所属项目'); return
+  }
   if (!form.value.name || !form.value.name.trim()) {
     ElMessage.warning('请填写角色名称'); return
+  }
+  if (!form.value.id && !form.value.apiKey.trim()) {
+    ElMessage.warning('请填写 API Key：未配置 Key 的角色无法发起对话'); return
   }
   saving.value = true
   try {
     const data = {
+      projectId: form.value.projectId,
       name: form.value.name.trim(),
       avatar: form.value.avatar || null,
       systemPrompt: form.value.systemPrompt || null,
+      provider: form.value.provider || null,
+      apiBaseUrl: form.value.apiBaseUrl || null,
       model: form.value.model || null,
       temperature: form.value.temperature,
       apiKey: form.value.apiKey || null
@@ -148,7 +305,7 @@ async function saveAgent() {
     if (res.code === 200) {
       ElMessage.success('保存成功')
       formVisible.value = false
-      await loadAgents()
+      await loadAll()
     } else {
       ElMessage.error(res.msg || '保存失败')
     }
@@ -167,7 +324,7 @@ async function removeAgent(a) {
     const res = await aiAgentDelete(a.id)
     if (res.code === 200) {
       ElMessage.success('已删除')
-      await loadAgents()
+      await loadAll()
     } else {
       ElMessage.error(res.msg || '删除失败')
     }
@@ -190,7 +347,7 @@ async function startChat(a) {
   }
 }
 
-onMounted(loadAgents)
+onMounted(loadAll)
 </script>
 
 <style scoped>
@@ -198,35 +355,29 @@ onMounted(loadAgents)
 
 .page-head {
   display: flex; align-items: flex-start; justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 24px; margin-bottom: 16px;
 }
-.page-head h2 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px; }
+.page-head h2 { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 .page-head p { font-size: 13px; color: var(--text-secondary); margin: 0; }
 
-.agent-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+.agent-cell { display: flex; align-items: center; gap: 8px; }
+.agent-mark {
+  width: 22px; height: 22px; border-radius: var(--radius-md); flex-shrink: 0;
+  color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
 }
-.agent-card {
-  display: flex; align-items: center; gap: 12px;
-  background: var(--bg-white); border: 1px solid var(--border-light);
-  border-radius: var(--radius-md); padding: 14px 16px;
-}
-.ac-avatar {
-  width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0;
-  color: #fff; display: flex; align-items: center; justify-content: center;
-  font-size: 18px; font-weight: 700;
-}
-.ac-info { flex: 1; min-width: 0; }
-.ac-name { font-size: 14px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
-.ac-desc {
-  font-size: 12px; color: var(--text-muted); margin-top: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ac-actions { margin-top: 4px; display: flex; gap: 2px; }
 
-.avatar-preview {
-  display: inline-flex; width: 20px; height: 20px; border-radius: 5px;
-  color: #fff; align-items: center; justify-content: center; font-size: 11px;
+.model-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.model-select { flex: 1; min-width: 0; }
+
+/* 模型来源提示：预置兜底要显性提示，避免用户以为下拉里就是当前可用模型 */
+.model-hint { width: 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.6; }
+.model-hint.ok { color: var(--text-muted); }
+.model-hint.warn { color: var(--warning-color); }
+
+.opt-meta { float: right; color: var(--text-muted); font-size: 12px; }
+.mark-preview {
+  display: inline-flex; width: 18px; height: 18px; border-radius: var(--radius-sm);
+  color: #fff; align-items: center; justify-content: center; font-size: 10px;
 }
 </style>

@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.*;
 import zzz.service.forum.context.UserContext;
 import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.dto.AiAgentRequest;
+import zzz.service.forum.domain.dto.AiModelListRequest;
+import zzz.service.forum.domain.dto.AiModelListResponse;
 import zzz.service.forum.domain.dto.R;
 import zzz.service.forum.service.AiAgentService;
 
@@ -41,6 +43,18 @@ public class AiAgentController {
             }
         }
         return R.ok(agents);
+    }
+
+    /**
+     * 拉取厂商可用模型列表，用于填充配置表单的模型下拉。
+     * 厂商 /models 调不通时回退预置列表，始终返回 200，不阻断表单；
+     * 响应里的 source 标明数据来自厂商还是预置，前端据此提示用户。
+     */
+    @PostMapping("/models")
+    public R<AiModelListResponse> models(@RequestBody AiModelListRequest request) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        return R.ok(aiAgentService.listModels(userId, request));
     }
 
     /** 创建角色（TODO Phase C: 校验权限点 ai:agent:create） */

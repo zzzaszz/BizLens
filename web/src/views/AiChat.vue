@@ -16,7 +16,7 @@ export default { name: 'AiChat' }
         >
           <div class="conv-title">{{ c.title }}</div>
           <div class="conv-meta">
-            <span>{{ c.agentid ? agentName(c.agentid) : '通用 AI' }}</span>
+            <span>{{ c.agentid ? agentName(c.agentid) : '未绑定角色' }}</span>
             <span class="conv-time">{{ fmtTime(c.updatedat) }}</span>
           </div>
         </div>
@@ -37,7 +37,7 @@ export default { name: 'AiChat' }
         <div ref="msgBox" class="ai-messages">
           <div v-for="(m, i) in messages" :key="i" class="bubble-row" :class="{ mine: m.sendertype === 'USER' }">
             <div class="bubble-avatar" :class="{ ai: m.sendertype !== 'USER' }">
-              <el-icon v-if="m.sendertype !== 'USER'"><MagicStick /></el-icon>
+              <el-icon v-if="m.sendertype !== 'USER'"><ChatDotRound /></el-icon>
               <span v-else>{{ myNickname[0] }}</span>
             </div>
             <div class="bubble-body">
@@ -65,31 +65,31 @@ export default { name: 'AiChat' }
       </template>
 
       <div v-else class="ai-empty">
-        <div class="empty-icon"><el-icon :size="44"><MagicStick /></el-icon></div>
-        <h3>AI 对话</h3>
-        <p>创建一个会话，向 AI 提问代码背后的业务规则与处理流程</p>
+        <div class="empty-icon"><el-icon :size="36"><ChatDotRound /></el-icon></div>
+        <h3>选择一个会话开始</h3>
+        <p>向角色提问代码背后的业务规则与处理流程</p>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建会话</el-button>
       </div>
     </div>
 
-    <!-- 新建会话弹窗 -->
-    <el-dialog v-model="createVisible" title="新建 AI 会话" width="420px" :append-to-body="true">
+    <!-- 新建会话弹窗：会话必须绑定角色，角色由代码项目创建 -->
+    <el-dialog v-model="createVisible" title="新建会话" width="420px" :append-to-body="true">
       <el-form label-width="70px">
-        <el-form-item label="标题">
-          <el-input v-model="createForm.title" placeholder="可选，默认 AI 对话" maxlength="32" />
-        </el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="createForm.agentId" placeholder="通用 AI（不选角色）" clearable style="width:100%">
-            <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id">
-              <span>{{ a.name }}</span>
-              <el-tag v-if="a.issystem === 1" size="small" type="info" effect="plain" style="margin-left:8px">系统</el-tag>
-            </el-option>
+        <el-form-item label="角色" required>
+          <el-select v-model="createForm.agentId" placeholder="选择 AI 角色" style="width:100%">
+            <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
+          <p v-if="!agents.length" class="dialog-tip">
+            还没有可用角色。请先在「代码项目」登记项目并完成索引，再为它创建角色。
+          </p>
+        </el-form-item>
+        <el-form-item label="标题">
+          <el-input v-model="createForm.title" placeholder="留空则使用角色名称" maxlength="32" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="createConversation">创建</el-button>
+        <el-button type="primary" :loading="creating" :disabled="!createForm.agentId" @click="createConversation">创建</el-button>
       </template>
     </el-dialog>
   </div>
@@ -98,7 +98,7 @@ export default { name: 'AiChat' }
 <script setup>
 import { ref, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Close, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Close, ChatDotRound } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import {
   aiCreateConversation,
@@ -162,13 +162,21 @@ async function openConversation(c) {
 
 function openCreate() {
   createForm.value = { title: '', agentId: null }
+  // 只有一个角色时直接预选
+  if (agents.value.length === 1) {
+    createForm.value.agentId = agents.value[0].id
+  }
   createVisible.value = true
 }
 
 async function createConversation() {
+  if (!createForm.value.agentId) {
+    ElMessage.warning('请选择 AI 角色：会话必须绑定角色才能对话')
+    return
+  }
   creating.value = true
   try {
-    const res = await aiCreateConversation({ title: createForm.value.title, agentId: createForm.value.agentId || null })
+    const res = await aiCreateConversation({ title: createForm.value.title, agentId: createForm.value.agentId })
     if (res.code === 200) {
       createVisible.value = false
       ElMessage.success('会话已创建')
@@ -241,12 +249,19 @@ async function sendMsg() {
   }
 }
 
-/** 解析单条 SSE 事件块 */
+/**
+ * 解析单条 SSE 事件块。
+ * 按 SSE 规范：一个事件可以有多行 `data:`，必须全部取出后用换行拼回。
+ * 只取第一行会丢掉多行 Markdown 回复的正文（服务端已按行拆分发送）。
+ */
 function handleSseChunk(chunk, aiIdx) {
-  const event = chunk.split('\n').find(l => l.startsWith('event:')) || ''
-  const dataLine = chunk.split('\n').find(l => l.startsWith('data:'))
-  if (!dataLine) return
-  const data = dataLine.slice(5).trim()
+  const lines = chunk.split('\n')
+  const event = lines.find(l => l.startsWith('event:')) || ''
+  const dataLines = lines.filter(l => l.startsWith('data:'))
+  if (!dataLines.length) return
+  // 服务端按 "data:" + 内容 写出，不带前导空格，所以直接 slice(5)；
+  // 这里不做 trim，避免吃掉 Markdown 的缩进和空行
+  const data = dataLines.map(l => l.slice(5)).join('\n')
   if (!data) return
   if (event.includes('error')) {
     ElMessage.error(data)
@@ -276,11 +291,15 @@ onMounted(() => {
 .new-btn { margin: 12px; }
 .conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
 .conv-item {
-  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer;
+  border-left: 2px solid transparent;
   transition: background .15s;
 }
 .conv-item:hover { background: var(--bg-light); }
-.conv-item.active { background: rgba(124,58,237,.08); }
+.conv-item.active {
+  background: rgba(37, 99, 235, .06);
+  border-left-color: var(--accent-color);
+}
 .conv-title { font-size: 13px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .conv-time { flex-shrink: 0; }
@@ -305,21 +324,22 @@ onMounted(() => {
 .bubble-row { display: flex; gap: 10px; }
 .bubble-row.mine { flex-direction: row-reverse; }
 .bubble-avatar {
-  width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+  width: 32px; height: 32px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-dark));
+  background: var(--accent-color);
   color: #fff; font-size: 13px; font-weight: 600;
 }
-.bubble-avatar.ai { background: #10b981; }
+.bubble-avatar.ai { background: #475569; }
 .bubble-body { max-width: 70%; }
 .bubble-row.mine .bubble-body { text-align: right; }
 .bubble-name { font-size: 12px; color: var(--text-muted); margin-bottom: 3px; }
 .bubble-content {
-  display: inline-block; padding: 9px 13px; border-radius: 10px;
-  background: var(--bg-light); font-size: 13px; line-height: 1.6;
+  display: inline-block; padding: 9px 13px; border-radius: var(--radius-md);
+  background: var(--bg-light); border: 1px solid var(--border-light);
+  font-size: 13px; line-height: 1.6;
   color: var(--text-primary); word-break: break-word; text-align: left; white-space: pre-wrap;
 }
-.bubble-content.mine { background: var(--accent-color); color: #fff; }
+.bubble-content.mine { background: var(--accent-color); border-color: var(--accent-color); color: #fff; }
 
 .ai-input { padding: 12px 16px; border-top: 1px solid var(--border-light); flex-shrink: 0; }
 
@@ -329,12 +349,14 @@ onMounted(() => {
   justify-content: center; gap: 8px; color: var(--text-secondary);
 }
 .empty-icon {
-  width: 84px; height: 84px; border-radius: 22px;
-  background: rgba(16,185,129,.1); color: #10b981;
+  width: 64px; height: 64px; border-radius: var(--radius-xl);
+  background: rgba(37, 99, 235, .08); color: var(--accent-color);
   display: flex; align-items: center; justify-content: center;
 }
-.ai-empty h3 { font-size: 18px; margin: 8px 0 0; color: var(--text-primary); }
+.ai-empty h3 { font-size: 16px; font-weight: 600; margin: 8px 0 0; color: var(--text-primary); }
 .ai-empty p { font-size: 13px; color: var(--text-muted); margin: 0 0 8px; }
+
+.dialog-tip { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
 
 @media (max-width: 768px) {
   .ai-sidebar { width: 160px; }

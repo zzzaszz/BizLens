@@ -14,7 +14,10 @@ public interface AiAgentMapper {
 
     AiAgentEntity getById(@Param("id") Long id);
 
-    /** 系统预置角色 + 当前用户自建角色（均启用） */
+    /** 项目绑定的角色（一个项目最多一个，由 uk_ai_agent_project 保证） */
+    AiAgentEntity getByProjectId(@Param("projectId") Long projectId);
+
+    /** 当前用户创建的角色（均启用） */
     List<AiAgentEntity> listForUser(@Param("userId") Long userId);
 
     int insert(AiAgentEntity entity);

@@ -5,6 +5,7 @@
     <resultMap type="zzz.service.forum.domain.AiAgentEntity" id="AiAgentMap">
         <result property="id" column="Id" jdbcType="BIGINT"/>
         <result property="userid" column="UserId" jdbcType="BIGINT"/>
+        <result property="projectid" column="ProjectId" jdbcType="BIGINT"/>
         <result property="name" column="Name" jdbcType="VARCHAR"/>
         <result property="code" column="Code" jdbcType="VARCHAR"/>
         <result property="model" column="Model" jdbcType="VARCHAR"/>
@@ -21,26 +22,35 @@
         <result property="updatedat" column="UpdatedAt" jdbcType="TIMESTAMP"/>
     </resultMap>
 
+    <sql id="columns">
+        "Id", "UserId", "ProjectId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
+        "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
+    </sql>
+
     <select id="getById" resultMap="AiAgentMap">
-        select "Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
-               "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
+        select <include refid="columns"/>
         from "AiAgent"
         where "Id" = #{id}
     </select>
 
+    <select id="getByProjectId" resultMap="AiAgentMap">
+        select <include refid="columns"/>
+        from "AiAgent"
+        where "ProjectId" = #{projectId}
+    </select>
+
     <select id="listForUser" resultMap="AiAgentMap">
-        select "Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
-               "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
+        select <include refid="columns"/>
         from "AiAgent"
         where "Enabled" = 1
-          and ("IsSystem" = 1 or "UserId" = #{userId})
-        order by "IsSystem" desc, "CreatedAt" desc
+          and "UserId" = #{userId}
+        order by "CreatedAt" desc
     </select>
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiAgentEntity">
-        insert into "AiAgent"("Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled",
+        insert into "AiAgent"("Id", "UserId", "ProjectId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled",
                             "IsSystem", "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt")
-        values (#{id}, #{userid}, #{name}, #{code}, #{model}, #{systemprompt}, #{temperature}, #{maxtokens},
+        values (#{id}, #{userid}, #{projectid}, #{name}, #{code}, #{model}, #{systemprompt}, #{temperature}, #{maxtokens},
                 #{enabled}, #{issystem}, #{avatar}, #{provider}, #{apibaseurl}, #{apikeyenc}, #{createdat}, #{updatedat})
     </insert>
 

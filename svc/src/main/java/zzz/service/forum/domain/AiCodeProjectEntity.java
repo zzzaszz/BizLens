@@ -5,7 +5,7 @@ import lombok.Data;
 import java.io.Serializable;
 import java.util.Date;
 
-/** 代码知识库项目元数据，不保存源码内容。 */
+/** 代码知识库项目元数据。 */
 @Data
 public class AiCodeProjectEntity implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -17,6 +17,8 @@ public class AiCodeProjectEntity implements Serializable {
     private String gitCommit;
     private String credentialRef;
     private String status;
+    /** 最近一次索引失败的原因（已截断、已抹掉 URL 中的凭据）；成功时为空 */
+    private String lastError;
     private Date lastIndexedAt;
     private Integer documentCount;
     private Integer chunkCount;

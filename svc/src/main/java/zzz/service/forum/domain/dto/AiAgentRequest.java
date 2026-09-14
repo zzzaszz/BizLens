@@ -14,6 +14,8 @@ public class AiAgentRequest implements Serializable {
 
     /** 角色ID（编辑时必传） */
     private Long id;
+    /** 所属代码项目ID（创建时必传；编辑时忽略，不允许改绑） */
+    private Long projectId;
     /** 角色名称 */
     private String name;
     /** 角色编码（可空） */
@@ -32,7 +34,7 @@ public class AiAgentRequest implements Serializable {
     private String provider;
     /** 厂商base-url（留空=系统默认） */
     private String apiBaseUrl;
-    /** 用户自己的API Key（留空不覆盖；明文，后端加密后入库） */
+    /** API Key（创建时必填；编辑时留空表示不覆盖。明文，后端加密后入库） */
     private String apiKey;
     /** 是否启用（编辑时可选） */
     private Integer enabled;

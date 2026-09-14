@@ -1,5 +1,10 @@
 package zzz.service.forum.ai;
 
+import org.slf4j.LoggerFactory;
+
+import java.util.Collections;
+import java.util.List;
+
 /**
  * 大模型调用抽象层。
  * <p>
@@ -43,5 +48,22 @@ public interface AiProvider {
      */
     default String providerName() {
         return "default";
+    }
+
+    /**
+     * 拉取厂商可用模型列表（OpenAI 兼容的 GET {baseUrl}/models）。
+     * <p>
+     * 仅用于填充配置表单的下拉选项，属于辅助能力，因此默认返回空列表而非抛错；
+     * 调用方在拿到空列表时自行回退到预置列表，不能因此阻断表单。
+     *
+     * @param baseUrl 厂商 base-url
+     * @param apiKey  调用方提供的 Key
+     * @return 模型 id 列表；不支持或调用失败时返回空列表
+     */
+    default List<String> listModels(String baseUrl, String apiKey) {
+        // 防御：Provider 漏覆写时不能静默返回空，否则模型下拉会无声退化成预置列表，排查时毫无线索
+        LoggerFactory.getLogger(AiProvider.class)
+                .warn("{} 未实现 listModels，模型列表将回退到预置兜底", getClass().getSimpleName());
+        return Collections.emptyList();
     }
 }

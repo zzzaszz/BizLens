@@ -141,10 +141,10 @@ function persistLogin(data) {
     nickname: data.nickname,
     avatar: data.avatar,
     role: data.role ?? 0,
-    themeColor: data.themeColor || '#7C3AED'
+    themeColor: data.themeColor || '#2563EB'
   }))
   // 应用主题颜色到全局 CSS 变量
-  applyThemeColor(data.themeColor || '#7C3AED')
+  applyThemeColor(data.themeColor || '#2563EB')
 }
 
 /** 将主题颜色应用到全局 CSS 变量 */
@@ -224,36 +224,23 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* 背景：纯 CSS 渐变（光源 + 底色），不依赖背景图 */
+/* 背景：纯 CSS，深板岩底色 + 一层细网格，无渐变、无光源装饰 */
 .login-bg {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 18% 20%, rgba(124, 58, 237, 0.55), transparent 55%),
-    radial-gradient(circle at 82% 80%, rgba(59, 130, 246, 0.45), transparent 55%),
-    linear-gradient(135deg, #100e1c 0%, #1e1b4b 55%, #2a1d5e 100%);
-}
-
-/* 细网格纹理，替代原背景图的层次感 */
-.login-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
+  background-color: var(--sidebar-bg);
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 78%);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 78%);
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 .login-card {
   width: 360px;
   background: var(--bg-white);
-  border-radius: var(--radius-lg);
-  padding: 48px 40px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-xl);
+  padding: 40px 36px;
   position: relative;
   z-index: 1;
   border: 1px solid var(--border-light);
@@ -264,21 +251,20 @@ onMounted(() => {
   margin-bottom: 36px;
 }
 
-/* 品牌标识：渐变色块 + 字母，替代原 logo 图片，跟随主题色 */
+/* 品牌标识：实色方块 + 字母，跟随主题色 */
 .logo-box {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-xl);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 16px;
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-dark));
+  background: var(--accent-color);
   color: #fff;
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.26);
+  letter-spacing: 0.6px;
 }
 
 .logo-area h1 {

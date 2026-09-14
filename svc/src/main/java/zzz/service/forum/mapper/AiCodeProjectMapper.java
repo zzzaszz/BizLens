@@ -21,5 +21,8 @@ public interface AiCodeProjectMapper {
     int markIndexed(@Param("id") Long id, @Param("status") String status,
                     @Param("gitCommit") String gitCommit);
 
+    /** 索引失败：状态置 FAILED 并记录可排查的原因 */
+    int markFailed(@Param("id") Long id, @Param("error") String error);
+
     int delete(@Param("id") Long id);
 }

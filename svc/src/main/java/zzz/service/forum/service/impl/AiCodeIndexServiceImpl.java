@@ -32,8 +32,11 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 基础代码索引器：临时浅克隆、保存元数据、删除工作区。
- * 本阶段不保存源码，不执行 AST/Embedding，供后续索引器替换。
+ * 基础代码索引器：临时浅克隆、保存元数据与切片源码、删除工作区。
+ * <p>
+ * 每个切片会落一份截断后的源码原文（source_snippet），供对话时按关键词召回、
+ * 注入模型理解业务逻辑；回答侧由 AiSafetyGuard 拦截源码输出。
+ * 仍不执行 AST/Embedding，不做向量化。
  */
 @Service("aiCodeIndexService")
 public class AiCodeIndexServiceImpl implements AiCodeIndexService {
@@ -42,6 +45,12 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private static final int MAX_FILES = 2000;
     private static final long MAX_FILE_BYTES = 2 * 1024 * 1024L;
     private static final int MAX_SYMBOLS_PER_FILE = 200;
+    /** 单个切片的源码片段上限，防止一个巨型方法把库撑爆 */
+    private static final int MAX_SNIPPET_CHARS = 1200;
+    /** 每个文件所有切片的源码总量上限，兜住 MAX_SYMBOLS_PER_FILE 带来的最坏情况 */
+    private static final int MAX_SNIPPET_CHARS_PER_FILE = 20000;
+    /** FILE 级切片只留文件头，它主要用来提供"这个文件大概是什么"，不需要全量 */
+    private static final int MAX_FILE_HEAD_CHARS = 800;
     private static final Set<String> EXTENSIONS = new HashSet<>(Arrays.asList(
             "java", "kt", "xml", "vue", "js", "ts", "yml", "yaml", "json", "sql"
     ));
@@ -90,7 +99,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             log.info("code project indexed, projectId={}, files={}, commit={}", projectId, counter.count, commit);
         } catch (Exception e) {
             log.warn("code project index failed, projectId={}", projectId, e);
-            projectMapper.updateStatus(projectId, "FAILED");
+            // 同时写库：前端只看到一个「失败」标签是不够的，要能看到为什么失败
+            projectMapper.markFailed(projectId, sanitizeGitError(e));
         } finally {
             deleteWorkspace(workspace);
         }
@@ -102,6 +112,9 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         String language = extension(file);
         String checksum = sha256(text);
         Date now = new Date();
+        // 按行切一次，后面所有片段都从这里取，避免反复 split
+        String[] lines = text.split("\\R", -1);
+        SnippetBudget budget = new SnippetBudget(MAX_SNIPPET_CHARS_PER_FILE);
 
         AiCodeDocumentEntity document = new AiCodeDocumentEntity();
         document.setId(snowflakeIdGenerator.nextId());
@@ -112,7 +125,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         document.setSymbolName(file.getFileName().toString());
         document.setSummary("代码文件 " + relativePath + "，语言 " + language + "，大小 " + bytes + " 字节");
         document.setStartLine(1);
-        document.setEndLine(text.isEmpty() ? 0 : text.split("\\R", -1).length);
+        document.setEndLine(lines.length);
         document.setCreatedAt(now);
         document.setUpdatedAt(now);
         documentMapper.insert(document);
@@ -123,23 +136,47 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         chunk.setChunkType("FILE");
         chunk.setSymbolName(document.getSymbolName());
         chunk.setBusinessSummary(document.getSummary());
-        chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + language + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
+        chunk.setSourceSnippet(sliceLines(lines, 1, lines.length, MAX_FILE_HEAD_CHARS));
+        chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
         chunk.setCreatedAt(now);
         chunkMapper.insert(chunk);
 
         int symbolCount = 0;
         for (CodeSymbolExtractor.Symbol symbol : symbolExtractor.extract(language, text)) {
             if (symbolCount++ >= MAX_SYMBOLS_PER_FILE) break;
+            if (!budget.tryConsume(MAX_SNIPPET_CHARS)) break;
             AiCodeChunkEntity symbolChunk = new AiCodeChunkEntity();
             symbolChunk.setId(snowflakeIdGenerator.nextId());
             symbolChunk.setDocumentId(document.getId());
             symbolChunk.setChunkType(symbol.getType());
             symbolChunk.setSymbolName(symbol.getName());
             symbolChunk.setBusinessSummary(symbol.getSummary() + "，文件 " + relativePath);
-            symbolChunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + language + "\",\"startLine\":" + symbol.getStartLine() + ",\"endLine\":" + symbol.getEndLine() + "}");
+            symbolChunk.setSourceSnippet(sliceLines(lines, symbol.getStartLine(), symbol.getEndLine(), MAX_SNIPPET_CHARS));
+            symbolChunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":" + symbol.getStartLine() + ",\"endLine\":" + symbol.getEndLine() + "}");
             symbolChunk.setCreatedAt(now);
             chunkMapper.insert(symbolChunk);
         }
+    }
+
+    /**
+     * 取 [startLine, endLine] 闭区间的源码文本，超长按 maxChars 截断。
+     * 行号越界时返回空串而不是抛错——索引是个尽力而为的过程，不该为单个切片中断整轮索引。
+     */
+    private String sliceLines(String[] lines, int startLine, int endLine, int maxChars) {
+        if (lines.length == 0) return "";
+        int from = Math.max(startLine, 1);
+        int to = Math.min(endLine, lines.length);
+        if (from > to) return "";
+
+        StringBuilder snippet = new StringBuilder(Math.min(maxChars, 256));
+        for (int i = from; i <= to && snippet.length() < maxChars; i++) {
+            snippet.append(lines[i - 1]).append('\n');
+        }
+        if (snippet.length() > maxChars) {
+            snippet.setLength(maxChars);
+            snippet.append("\n...(已截断)");
+        }
+        return snippet.toString();
     }
 
     private void runGitClone(AiCodeProjectEntity project, Path workspace) throws Exception {
@@ -234,6 +271,22 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     }
     private String truncate(String value) { return value == null ? "" : value.substring(0, Math.min(value.length(), 500)); }
 
+    /**
+     * 把异常整理成可落库、可展示的失败原因。
+     * <p>
+     * 两件事：① 截断，Git 输出可能很长；② 抹掉 URL 里的凭据——
+     * Git 报错经常回显完整地址，如果用户把 token 写进了 gitUrl（如 https://user:token@host/repo），
+     * 原样落库等于把凭据存进了普通表。
+     */
+    private String sanitizeGitError(Exception e) {
+        String message = e.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            message = e.getClass().getSimpleName();
+        }
+        String redacted = message.replaceAll("(://)[^/@\\s]+@", "$1***@");
+        return truncate(redacted);
+    }
+
     private void deleteWorkspace(Path workspace) {
         if (workspace == null) return;
         try {
@@ -245,4 +298,21 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     }
 
     private static class IndexCounter { private int count; }
+
+    /** 单文件源码片段总额度：用完之后该文件剩余的符号切片不再落源码，避免超大文件把库撑爆 */
+    private static class SnippetBudget {
+        private int remaining;
+
+        SnippetBudget(int total) {
+            this.remaining = total;
+        }
+
+        boolean tryConsume(int amount) {
+            if (remaining <= 0) {
+                return false;
+            }
+            remaining -= amount;
+            return true;
+        }
+    }
 }

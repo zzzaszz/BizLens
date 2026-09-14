@@ -28,8 +28,8 @@
           aria-label="站点导航"
         >
           <el-menu-item index="/ai">
-            <el-icon><MagicStick /></el-icon>
-            <span>AI 对话</span>
+            <el-icon><ChatDotRound /></el-icon>
+            <span>业务问答</span>
           </el-menu-item>
 
           <el-menu-item index="/dashboard">
@@ -113,13 +113,13 @@ import {useRoute, useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
 import {
   ArrowDown,
+  ChatDotRound,
   Cpu,
   Expand,
   Fold,
   FolderOpened,
   HomeFilled,
-  Loading,
-  MagicStick
+  Loading
 } from '@element-plus/icons-vue'
 import {logout} from '@/api'
 
@@ -170,7 +170,7 @@ const currentMenu = computed(() => {
   const path = route.path
   const pathMap = {
     '/dashboard': '工作台',
-    '/ai': 'AI 对话',
+    '/ai': '业务问答',
     '/ai/agents': 'AI 角色',
     '/projects': '代码项目',
   }
@@ -243,6 +243,7 @@ const handleLogout = async () => {
   transition: width var(--transition-normal);
   overflow: hidden;
   position: relative;
+  border-right: 1px solid var(--sidebar-border);
 }
 
 .sidebar.mobile-drawer {
@@ -254,15 +255,15 @@ const handleLogout = async () => {
   box-shadow: var(--shadow-xl);
 }
 
-/* Logo区域 */
+/* Logo区域：实色方块，无渐变 */
 .logo {
-  height: 64px;
+  height: 60px;
   display: flex;
   align-items: center;
   padding: 0 16px;
-  background: var(--sidebar-header-bg);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  gap: 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--sidebar-border);
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -272,16 +273,16 @@ const handleLogout = async () => {
 }
 
 .logo-icon {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-dark));
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  background: var(--accent-color);
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   color: #fff;
   flex-shrink: 0;
 }
@@ -292,16 +293,16 @@ const handleLogout = async () => {
 }
 
 .logo-text h2 {
-  font-size: 16px;
-  font-weight: 700;
-  color: #ecf0f1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #F8FAFC;
   margin: 0;
   line-height: 1.3;
 }
 
 .logo-text p {
-  font-size: 12px;
-  color: #94a3b8;
+  font-size: 11px;
+  color: var(--sidebar-text-muted);
   margin: 0;
 }
 
@@ -315,118 +316,78 @@ const handleLogout = async () => {
 }
 
 .nav-scrollbar :deep(.el-scrollbar__thumb) {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.16);
   border-radius: 2px;
 }
 
-/* ============ 菜单样式 - 深色侧边栏适配 ============ */
+/* ============ 菜单：扁平列表，选中用左侧竖条 ============ */
 .sidebar-menu {
   border-right: none !important;
+  padding: 8px 0;
 }
 
-/* 菜单整体背景透明 */
 .sidebar-menu :deep(.el-menu) {
   background-color: transparent !important;
 }
 
-/* 子菜单标题 */
-.sidebar-menu :deep(.el-sub-menu__title) {
-  background-color: transparent !important;
-  color: #cbd5e1 !important;
-  height: 48px;
-  line-height: 48px;
-  font-size: 14px;
-}
-
-.sidebar-menu :deep(.el-sub-menu__title:hover) {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  color: #ecf0f1 !important;
-}
-
-.sidebar-menu :deep(.el-sub-menu__title .el-icon) {
-  font-size: 18px;
-  color: #cbd5e1;
-}
-
-.sidebar-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
-  color: #ecf0f1 !important;
-}
-
-/* 菜单项 */
 .sidebar-menu :deep(.el-menu-item) {
+  position: relative;
   background-color: transparent !important;
-  color: #cbd5e1 !important;
-  height: 44px;
-  line-height: 44px;
+  color: var(--sidebar-text) !important;
+  height: 38px;
+  line-height: 38px;
   font-size: 13px;
-  transition: all var(--transition-fast);
+  margin: 0 !important;
+  border-radius: 0;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  color: #ecf0f1 !important;
+  background-color: var(--sidebar-hover-bg) !important;
+  color: #F8FAFC !important;
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
-  background-color: var(--sidebar-active-bg) !important;
-  color: #fff !important;
-  border-radius: 4px;
-  margin: 2px 8px;
-  padding-left: 20px !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+  color: #FFFFFF !important;
+  margin: 0 !important;
+  border-radius: 0;
+}
+
+/* 选中态左侧 2px 竖条：用伪元素，避免与折叠态的 padding 打架 */
+.sidebar-menu :deep(.el-menu-item.is-active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--sidebar-active-bg);
 }
 
 .sidebar-menu :deep(.el-menu-item .el-icon) {
-  font-size: 16px;
+  font-size: 15px;
   margin-right: 8px;
   color: inherit;
-}
-
-/* 子菜单展开后的菜单项 */
-.sidebar-menu :deep(.el-sub-menu .el-menu) {
-  background-color: transparent !important;
-}
-
-.sidebar-menu :deep(.el-sub-menu .el-menu .el-menu-item) {
-  background-color: transparent !important;
-  min-width: auto !important;
-  padding-left: 48px !important;
-  height: 44px;
-  line-height: 44px;
-  font-size: 13px;
-  color: rgba(203, 213, 225, 0.9) !important;
-}
-
-.sidebar-menu :deep(.el-sub-menu .el-menu .el-menu-item:hover) {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  color: #ecf0f1 !important;
-}
-
-.sidebar-menu :deep(.el-sub-menu .el-menu .el-menu-item.is-active) {
-  background-color: var(--sidebar-active-bg) !important;
-  color: #fff !important;
 }
 
 /* 分组标题 */
 .sidebar-menu :deep(.el-menu-item-group__title) {
   color: rgba(255, 255, 255, 0.35) !important;
-  font-size: 12px;
-  padding: 12px 20px 4px;
+  font-size: 11px;
+  padding: 12px 16px 4px;
   letter-spacing: 1px;
-  background-color: transparent !important;
-}
-
-/* el-menu 弹出层（折叠时） */
-.sidebar-menu :deep(.el-menu--collapse .el-sub-menu__title) {
   background-color: transparent !important;
 }
 
 /* 侧边栏底部 */
 .sidebar-footer {
-  padding: 12px 16px;
-  background: var(--sidebar-footer-bg);
-  font-size: 12px;
+  padding: 10px 16px;
+  background: transparent;
+  border-top: 1px solid var(--sidebar-border);
+  font-size: 11px;
   text-align: center;
-  color: #94a3b8;
+  color: var(--sidebar-text-muted);
   flex-shrink: 0;
 }
 
@@ -445,7 +406,6 @@ const handleLogout = async () => {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   z-index: var(--z-sticky);
 }
 
@@ -456,15 +416,15 @@ const handleLogout = async () => {
 }
 
 .collapse-btn {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .collapse-btn:hover {
@@ -500,7 +460,7 @@ const handleLogout = async () => {
   gap: 8px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   transition: background var(--transition-fast);
 }
 
@@ -515,8 +475,8 @@ const handleLogout = async () => {
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-dark)) !important;
-  font-size: 14px;
+  background: var(--accent-color) !important;
+  font-size: 13px;
   font-weight: 600;
 }
 

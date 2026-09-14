@@ -1,64 +1,65 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  /* 主色调 - 设计系统蓝 */
-  --primary-color: #1E40AF;
+  /* 主色 - 企业蓝 */
+  --primary-color: #2563EB;
   --primary-light: #3B82F6;
-  --primary-dark: #1E3A8A;
+  --primary-dark: #1D4ED8;
 
-  /* 强调色 - 品牌紫 */
-  --accent-color: #7C3AED;
-  --accent-light: #A78BFA;
-  --accent-dark: #5B21B6;
-  --focus-ring-color: #3B82F6;
+  /* 强调色（与主色同源；登录后可由用户 themeColor 覆盖） */
+  --accent-color: #2563EB;
+  --accent-light: #3B82F6;
+  --accent-dark: #1D4ED8;
+  --focus-ring-color: #2563EB;
 
-  /* 辅助色 */
-  --success-color: #27ae60;
-  --success-light: #2ecc71;
-  --warning-color: #f39c12;
-  --warning-light: #f1c40f;
-  --danger-color: #e74c3c;
-  --danger-light: #ec7063;
-  --info-color: #16a085;
-  --info-light: #1abc9c;
+  /* 辅助色 - 降低饱和度，贴近后台系统观感 */
+  --success-color: #16A34A;
+  --success-light: #22C55E;
+  --warning-color: #D97706;
+  --warning-light: #F59E0B;
+  --danger-color: #DC2626;
+  --danger-light: #EF4444;
+  --info-color: #475569;
+  --info-light: #64748B;
 
-  /* 侧边栏配色 */
-  --sidebar-bg: #1a1a2e;
-  --sidebar-header-bg: #16213e;
-  --sidebar-footer-bg: #0f0f1a;
-  --sidebar-text: #e2e8f0;
-  --sidebar-text-muted: #94a3b8;
-  --sidebar-hover-bg: rgba(124, 58, 237, 0.1);
-  --sidebar-active-bg: #7C3AED;
+  /* 侧边栏：深板岩灰，无渐变 */
+  --sidebar-bg: #1E293B;
+  --sidebar-header-bg: #1E293B;
+  --sidebar-footer-bg: #1E293B;
+  --sidebar-text: #CBD5E1;
+  --sidebar-text-muted: #94A3B8;
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: #2563EB;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 
   /* 背景色 */
   --bg-color: #F8FAFC;
   --bg-light: #F1F5F9;
   --bg-white: #ffffff;
 
-  /* 文字色 */
-  --text-primary: #1E3A8A;
+  /* 文字色 - 中性深板岩，替代原深蓝标题色 */
+  --text-primary: #0F172A;
   --text-secondary: #475569;
-  --text-muted: #64748B;
+  --text-muted: #94A3B8;
   --text-white: #ffffff;
 
   /* 边框色 */
-  --border-color: #e0e0e0;
+  --border-color: #E2E8F0;
   --border-light: #E2E8F0;
-  --border-dark: #d0d0d0;
+  --border-dark: #CBD5E1;
 
-  /* 阴影 */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
-  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.2);
-  --shadow-card: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  /* 阴影：仅浮层保留必要的浅灰投影，卡片一律改用 1px 描边 */
+  --shadow-sm: none;
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-xl: 0 8px 24px rgba(15, 23, 42, 0.10);
+  --shadow-card: none;
 
-  /* 圆角 */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* 圆角：统一克制的小圆角 */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
 
   /* 间距 */
   --spacing-xs: 4px;
@@ -199,14 +200,14 @@ html, body {
 }
 
 .el-table__body tr:hover > td.el-table__cell {
-  background-color: rgba(30, 64, 175, 0.08) !important;
+  background-color: rgba(37, 99, 235, 0.06) !important;
 }
 
-/* 卡片样式优化 */
+/* 卡片：1px 描边替代投影 */
 .el-card {
   border-radius: var(--radius-md);
-  border: none;
-  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-light);
+  box-shadow: none;
 }
 
 .el-card__header {
@@ -294,8 +295,8 @@ html, body {
 /* 卡片容器 */
 .page-container {
   background: var(--bg-white);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
   padding: var(--spacing-lg);
 }
 
@@ -352,16 +353,10 @@ html, body {
 /* 统计卡片 */
 .stat-card {
   background: var(--bg-white);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   padding: var(--spacing-lg);
-  box-shadow: var(--shadow-sm);
-  border-left: 4px solid var(--primary-color);
-  transition: all var(--transition-normal);
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  border-left: 3px solid var(--primary-color);
 }
 
 .stat-card.warning {
