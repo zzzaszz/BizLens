@@ -1,0 +1,37 @@
+server:
+  port: 10610 #服务端口
+spring:
+  application:
+    name: bizlens-ai
+  profiles:
+    active: dev
+  main:
+    allow-bean-definition-overriding: true #当遇到同样名字的时候，是否允许覆盖注册
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+logging:
+  level:
+    org:
+      springframework:
+        security: info
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
+  type-aliases-package: zzz.service.**.domain
+pagehelper:
+  helper-dialect: postgresql
+  reasonable: true
+  support-methods-arguments: true
+
+# ============ AI 对话配置（密钥走环境变量，不提交到 Git） ============
+ai:
+  provider: deepseek
+  deepseek:
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: https://api.deepseek.com
+    model: deepseek-chat

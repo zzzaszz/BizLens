@@ -1,0 +1,1 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=zzz.service.forum.config.WvAutoConfiguration

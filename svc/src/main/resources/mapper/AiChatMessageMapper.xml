@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiChatMessageMapper">
+
+    <resultMap type="zzz.service.forum.domain.AiChatMessageEntity" id="AiChatMessageMap">
+        <result property="id" column="Id" jdbcType="BIGINT"/>
+        <result property="conversationid" column="ConversationId" jdbcType="BIGINT"/>
+        <result property="sendertype" column="SenderType" jdbcType="VARCHAR"/>
+        <result property="senderid" column="SenderId" jdbcType="VARCHAR"/>
+        <result property="content" column="Content" jdbcType="VARCHAR"/>
+        <result property="createtime" column="CreateTime" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiChatMessageEntity">
+        insert into "AiChatMessage"("Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime")
+        values (#{id}, #{conversationid}, #{sendertype}, #{senderid}, #{content}, #{createtime})
+    </insert>
+
+    <select id="listByConversation" resultMap="AiChatMessageMap">
+        select "Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime"
+        from "AiChatMessage"
+        where "ConversationId" = #{conversationId}
+        order by "CreateTime" asc
+    </select>
+
+    <select id="selectRecent" resultMap="AiChatMessageMap">
+        select "Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime"
+        from (
+                 select "Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime"
+                 from "AiChatMessage"
+                 where "ConversationId" = #{conversationId}
+                 order by "CreateTime" desc
+                 limit #{limit}
+             ) t
+        order by "CreateTime" asc
+    </select>
+</mapper>

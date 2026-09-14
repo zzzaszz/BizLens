@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiCodeProjectMapper">
+    <resultMap id="projectMap" type="zzz.service.forum.domain.AiCodeProjectEntity">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="git_url" property="gitUrl"/>
+        <result column="git_branch" property="gitBranch"/>
+        <result column="git_commit" property="gitCommit"/>
+        <result column="credential_ref" property="credentialRef"/>
+        <result column="status" property="status"/>
+        <result column="last_indexed_at" property="lastIndexedAt"/>
+        <result column="document_count" property="documentCount"/>
+        <result column="chunk_count" property="chunkCount"/>
+        <result column="symbol_chunk_count" property="symbolChunkCount"/>
+        <result column="created_by" property="createdBy"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="getById" resultMap="projectMap">
+        SELECT p.id, p.name, p.git_url, p.git_branch, p.git_commit, p.credential_ref, p.status,
+               p.last_indexed_at,
+               (SELECT COUNT(*) FROM ai_code_document d WHERE d.project_id = p.id) AS document_count,
+               (SELECT COUNT(*) FROM ai_code_chunk c
+                JOIN ai_code_document d ON d.id = c.document_id
+                WHERE d.project_id = p.id) AS chunk_count,
+               (SELECT COUNT(*) FROM ai_code_chunk c
+                JOIN ai_code_document d ON d.id = c.document_id
+                WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
+               p.created_by, p.created_at, p.updated_at
+        FROM ai_code_project p WHERE p.id = #{id}
+    </select>
+
+    <select id="listByUser" resultMap="projectMap">
+        SELECT p.id, p.name, p.git_url, p.git_branch, p.git_commit, p.credential_ref, p.status,
+               p.last_indexed_at,
+               (SELECT COUNT(*) FROM ai_code_document d WHERE d.project_id = p.id) AS document_count,
+               (SELECT COUNT(*) FROM ai_code_chunk c
+                JOIN ai_code_document d ON d.id = c.document_id
+                WHERE d.project_id = p.id) AS chunk_count,
+               (SELECT COUNT(*) FROM ai_code_chunk c
+                JOIN ai_code_document d ON d.id = c.document_id
+                WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
+               p.created_by, p.created_at, p.updated_at
+        FROM ai_code_project p
+        WHERE p.created_by = #{userId}
+        ORDER BY p.updated_at DESC
+    </select>
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiCodeProjectEntity">
+        INSERT INTO ai_code_project
+        (id, name, git_url, git_branch, credential_ref, status, created_by, created_at, updated_at)
+        VALUES (#{id}, #{name}, #{gitUrl}, #{gitBranch}, #{credentialRef}, #{status}, #{createdBy}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="update" parameterType="zzz.service.forum.domain.AiCodeProjectEntity">
+        UPDATE ai_code_project
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="gitUrl != null">git_url = #{gitUrl},</if>
+            <if test="gitBranch != null">git_branch = #{gitBranch},</if>
+            <if test="credentialRef != null">credential_ref = #{credentialRef},</if>
+            updated_at = CURRENT_TIMESTAMP
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE ai_code_project
+        SET status = #{status}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="markIndexed">
+        UPDATE ai_code_project
+        SET status = #{status}, git_commit = #{gitCommit},
+            last_indexed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">DELETE FROM ai_code_project WHERE id = #{id}</delete>
+</mapper>

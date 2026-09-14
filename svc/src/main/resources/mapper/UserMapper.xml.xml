@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="zzz.service.forum.mapper.UserMapper">
+
+    <resultMap id="userResultMap" type="zzz.service.forum.domain.User">
+        <id column="Id" property="id"/>
+        <result column="DeviceId" property="deviceId"/>
+        <result column="Username" property="username"/>
+        <result column="PasswordHash" property="passwordHash"/>
+        <result column="Nickname" property="nickname"/>
+        <result column="Avatar" property="avatar"/>
+        <result column="ThemeColor" property="themeColor"/>
+        <result column="Status" property="status"/>
+        <result column="Role" property="role"/>
+        <result column="LastLoginIp" property="lastLoginIp"/>
+        <result column="LastLoginAt" property="lastLoginAt"/>
+        <result column="CreatedAt" property="createdAt"/>
+        <result column="UpdatedAt" property="updatedAt"/>
+        <result column="Deleted" property="deleted"/>
+    </resultMap>
+
+    <select id="getById" resultMap="userResultMap">
+        SELECT * FROM "User" WHERE Id = #{id} AND Deleted = 0
+    </select>
+
+    <select id="selectById" resultMap="userResultMap">
+        SELECT * FROM "User" WHERE Id = #{id} AND Deleted = 0
+    </select>
+
+    <select id="getByDeviceId" resultMap="userResultMap">
+        SELECT * FROM "User" WHERE DeviceId = #{deviceId} AND Deleted = 0 LIMIT 1
+    </select>
+
+    <select id="getByUsername" resultMap="userResultMap">
+        SELECT *
+        FROM "User"
+        WHERE Username = #{username}
+          AND Deleted = 0 LIMIT 1
+    </select>
+
+    <insert id="insert">
+        INSERT INTO "User" (Id, DeviceId, Username, PasswordHash, Nickname, Avatar, ThemeColor, Status, Role, LastLoginIp,
+                          LastLoginAt, Deleted)
+        VALUES (#{id}, #{deviceId}, #{username}, #{passwordHash}, #{nickname}, #{avatar}, #{themeColor}, #{status}, #{role},
+                #{lastLoginIp}, #{lastLoginAt}, #{deleted})
+    </insert>
+
+    <update id="update">
+        UPDATE "User"
+        SET LastLoginIp = #{lastLoginIp},
+            LastLoginAt = #{lastLoginAt},
+            UpdatedAt = NOW()
+        WHERE Id = #{id}
+    </update>
+
+    <delete id="delete">
+        UPDATE "User" SET Deleted = 1, UpdatedAt = NOW() WHERE Id = #{id}
+    </delete>
+
+    <!-- ============ 用户管理 ============ -->
+
+    <resultMap id="userPojoMap" type="zzz.service.forum.domain.pojo.UserPojo">
+        <id column="Id" property="id"/>
+        <result column="Username" property="username"/>
+        <result column="Nickname" property="nickname"/>
+        <result column="Avatar" property="avatar"/>
+        <result column="Status" property="status"/>
+        <result column="Role" property="role"/>
+        <result column="LastLoginIp" property="lastloginip"/>
+        <result column="LastLoginAt" property="lastloginat"/>
+        <result column="CreatedAt" property="createdat"/>
+    </resultMap>
+
+    <sql id="pojoColumns">
+        Id
+        , Username, Nickname, Avatar, Status, Role, LastLoginIp, LastLoginAt, CreatedAt
+    </sql>
+
+    <select id="findPageList" resultMap="userPojoMap">
+        SELECT
+        <include refid="pojoColumns"/>
+        FROM "User"
+        WHERE Deleted = 0
+        <if test="keyword != null and keyword != ''">
+            AND (Username LIKE CONCAT('%', #{keyword}, '%') OR Nickname LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="status != null">
+            AND Status = #{status}
+        </if>
+        <if test="role != null">
+            AND Role = #{role}
+        </if>
+        ORDER BY CreatedAt DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countPageList" resultType="long">
+        SELECT COUNT(1)
+        FROM "User"
+        WHERE Deleted = 0
+        <if test="keyword != null and keyword != ''">
+            AND (Username LIKE CONCAT('%', #{keyword}, '%') OR Nickname LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="status != null">
+            AND Status = #{status}
+        </if>
+        <if test="role != null">
+            AND Role = #{role}
+        </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE "User"
+        SET Status    = #{status},
+            UpdatedAt = NOW()
+        WHERE Id = #{id}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE "User"
+        SET PasswordHash = #{passwordHash},
+            UpdatedAt    = NOW()
+        WHERE Id = #{id}
+    </update>
+
+    <update id="updateProfile">
+        UPDATE "User"
+        <set>
+            <if test="nickname != null">Nickname = #{nickname},</if>
+            <if test="role != null">Role = #{role},</if>
+            UpdatedAt = NOW()
+        </set>
+        WHERE Id = #{id}
+    </update>
+
+    <update id="updateThemeColor">
+        UPDATE "User"
+        SET ThemeColor = #{themeColor},
+            UpdatedAt = NOW()
+        WHERE Id = #{id}
+    </update>
+
+    <update id="updateUserProfile">
+        UPDATE "User"
+        <set>
+            <if test="nickname != null">Nickname = #{nickname},</if>
+            <if test="themeColor != null">ThemeColor = #{themeColor},</if>
+            UpdatedAt = NOW()
+        </set>
+        WHERE Id = #{id}
+    </update>
+
+</mapper>

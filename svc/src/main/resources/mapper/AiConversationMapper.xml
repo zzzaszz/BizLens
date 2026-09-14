@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiConversationMapper">
+
+    <resultMap type="zzz.service.forum.domain.AiConversationEntity" id="AiConversationMap">
+        <result property="id" column="Id" jdbcType="BIGINT"/>
+        <result property="userid" column="UserId" jdbcType="BIGINT"/>
+        <result property="agentid" column="AgentId" jdbcType="BIGINT"/>
+        <result property="title" column="Title" jdbcType="VARCHAR"/>
+        <result property="status" column="Status" jdbcType="INTEGER"/>
+        <result property="createdat" column="CreatedAt" jdbcType="TIMESTAMP"/>
+        <result property="updatedat" column="UpdatedAt" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <select id="getById" resultMap="AiConversationMap">
+        select "Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt"
+        from "AiConversation"
+        where "Id" = #{id}
+    </select>
+
+    <select id="listByUser" resultMap="AiConversationMap">
+        select "Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt"
+        from "AiConversation"
+        where "UserId" = #{userId}
+          and "Status" = 1
+        order by "UpdatedAt" desc
+    </select>
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiConversationEntity">
+        insert into "AiConversation"("Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt")
+        values (#{id}, #{userid}, #{agentid}, #{title}, #{status}, #{createdat}, #{updatedat})
+    </insert>
+
+    <update id="updateStatus">
+        update "AiConversation"
+        set "Status" = #{status},
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        where "Id" = #{id}
+    </update>
+</mapper>

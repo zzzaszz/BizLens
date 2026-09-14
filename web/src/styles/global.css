@@ -1,0 +1,477 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* 主色调 - 设计系统蓝 */
+  --primary-color: #1E40AF;
+  --primary-light: #3B82F6;
+  --primary-dark: #1E3A8A;
+
+  /* 强调色 - 品牌紫 */
+  --accent-color: #7C3AED;
+  --accent-light: #A78BFA;
+  --accent-dark: #5B21B6;
+  --focus-ring-color: #3B82F6;
+
+  /* 辅助色 */
+  --success-color: #27ae60;
+  --success-light: #2ecc71;
+  --warning-color: #f39c12;
+  --warning-light: #f1c40f;
+  --danger-color: #e74c3c;
+  --danger-light: #ec7063;
+  --info-color: #16a085;
+  --info-light: #1abc9c;
+
+  /* 侧边栏配色 */
+  --sidebar-bg: #1a1a2e;
+  --sidebar-header-bg: #16213e;
+  --sidebar-footer-bg: #0f0f1a;
+  --sidebar-text: #e2e8f0;
+  --sidebar-text-muted: #94a3b8;
+  --sidebar-hover-bg: rgba(124, 58, 237, 0.1);
+  --sidebar-active-bg: #7C3AED;
+
+  /* 背景色 */
+  --bg-color: #F8FAFC;
+  --bg-light: #F1F5F9;
+  --bg-white: #ffffff;
+
+  /* 文字色 */
+  --text-primary: #1E3A8A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-white: #ffffff;
+
+  /* 边框色 */
+  --border-color: #e0e0e0;
+  --border-light: #E2E8F0;
+  --border-dark: #d0d0d0;
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.2);
+  --shadow-card: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* 过渡 */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 400ms ease;
+
+  /* 顶栏高度 */
+  --header-height: 60px;
+
+  /* 侧边栏宽度 */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+
+  /* Z-Index 层级 */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-drawer: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-skip-link: 10000;
+}
+
+/* =============================================
+   全局基础样式
+   ============================================= */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Inter', 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background-color: var(--bg-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+/* =============================================
+   滚动条美化
+   ============================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 4px;
+  transition: background var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* =============================================
+   Element Plus 主题覆盖
+   ============================================= */
+
+/* 按钮样式优化 */
+.el-button--primary {
+  --el-button-bg-color: var(--primary-color);
+  --el-button-border-color: var(--primary-color);
+  --el-button-hover-bg-color: var(--primary-light);
+  --el-button-hover-border-color: var(--primary-light);
+  --el-button-active-bg-color: var(--primary-dark);
+  --el-button-active-border-color: var(--primary-dark);
+}
+
+.el-button--success {
+  --el-button-bg-color: var(--success-color);
+  --el-button-border-color: var(--success-color);
+  --el-button-hover-bg-color: var(--success-light);
+  --el-button-hover-border-color: var(--success-light);
+}
+
+.el-button--warning {
+  --el-button-bg-color: var(--warning-color);
+  --el-button-border-color: var(--warning-color);
+  --el-button-hover-bg-color: var(--warning-light);
+  --el-button-hover-border-color: var(--warning-light);
+}
+
+.el-button--danger {
+  --el-button-bg-color: var(--danger-color);
+  --el-button-border-color: var(--danger-color);
+  --el-button-hover-bg-color: var(--danger-light);
+  --el-button-hover-border-color: var(--danger-light);
+}
+
+/* 全局按钮：hover/focus/active 不显示额外阴影和 outline，但保留边框 */
+.el-button:hover,
+.el-button:focus,
+.el-button:active,
+.el-button.is-focus,
+.el-button.is-active {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* 表格样式优化 */
+.el-table {
+  border-radius: var(--radius-md) !important;
+  overflow: hidden;
+}
+
+.el-table th.el-table__cell {
+  background-color: var(--bg-light) !important;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: var(--bg-light);
+}
+
+.el-table__body tr:hover > td.el-table__cell {
+  background-color: rgba(30, 64, 175, 0.08) !important;
+}
+
+/* 卡片样式优化 */
+.el-card {
+  border-radius: var(--radius-md);
+  border: none;
+  box-shadow: var(--shadow-card);
+}
+
+.el-card__header {
+  border-bottom: 1px solid var(--border-light);
+  padding: var(--spacing-md) var(--spacing-lg);
+  font-weight: 600;
+}
+
+/* 对话框样式优化 */
+.el-dialog {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--border-light);
+  padding: var(--spacing-lg);
+  margin-right: 0;
+}
+
+.el-dialog__title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.el-dialog__body {
+  padding: var(--spacing-lg);
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--border-light);
+  padding: var(--spacing-md) var(--spacing-lg);
+}
+
+/* 表单样式优化 */
+.el-form-item__label {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ============ Input 圆角统一 ============ */
+.el-input__wrapper {
+  border-radius: var(--radius-sm);
+}
+
+/* 分页样式优化 */
+.el-pagination {
+  --el-pagination-button-bg-color: var(--bg-white);
+  --el-pagination-hover-color: var(--primary-color);
+}
+
+.el-pagination.is-background .el-pager li:not(.is-disabled).is-active {
+  background-color: var(--primary-color);
+}
+
+/* 标签样式优化 */
+.el-tag--success {
+  --el-tag-bg-color: rgba(39, 174, 96, 0.1);
+  --el-tag-border-color: rgba(39, 174, 96, 0.2);
+  --el-tag-text-color: var(--success-color);
+}
+
+.el-tag--warning {
+  --el-tag-bg-color: rgba(243, 156, 18, 0.1);
+  --el-tag-border-color: rgba(243, 156, 18, 0.2);
+  --el-tag-text-color: var(--warning-color);
+}
+
+.el-tag--danger {
+  --el-tag-bg-color: rgba(231, 76, 60, 0.1);
+  --el-tag-border-color: rgba(231, 76, 60, 0.2);
+  --el-tag-text-color: var(--danger-color);
+}
+
+.el-tag--info {
+  --el-tag-bg-color: rgba(52, 152, 219, 0.1);
+  --el-tag-border-color: rgba(52, 152, 219, 0.2);
+  --el-tag-text-color: var(--primary-color);
+}
+
+/* =============================================
+   通用工具类
+   ============================================= */
+
+/* 卡片容器 */
+.page-container {
+  background: var(--bg-white);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: var(--spacing-lg);
+}
+
+/* 页面标题 */
+.page-header {
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+}
+
+/* 状态徽章 */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-badge.success {
+  background-color: rgba(39, 174, 96, 0.1);
+  color: var(--success-color);
+}
+
+.status-badge.warning {
+  background-color: rgba(243, 156, 18, 0.1);
+  color: var(--warning-color);
+}
+
+.status-badge.danger {
+  background-color: rgba(231, 76, 60, 0.1);
+  color: var(--danger-color);
+}
+
+.status-badge.info {
+  background-color: rgba(52, 152, 219, 0.1);
+  color: var(--primary-color);
+}
+
+/* 统计卡片 */
+.stat-card {
+  background: var(--bg-white);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-sm);
+  border-left: 4px solid var(--primary-color);
+  transition: all var(--transition-normal);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card.warning {
+  border-left-color: var(--warning-color);
+}
+
+.stat-card.success {
+  border-left-color: var(--success-color);
+}
+
+.stat-card.danger {
+  border-left-color: var(--danger-color);
+}
+
+.stat-card .stat-title {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.stat-card .stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stat-card .stat-change {
+  font-size: 12px;
+  margin-top: var(--spacing-xs);
+}
+
+.stat-card .stat-change.positive {
+  color: var(--success-color);
+}
+
+.stat-card .stat-change.negative {
+  color: var(--danger-color);
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* =============================================
+   焦点管理 - 无障碍访问
+   ============================================= */
+
+/* 仅对可交互元素显示焦点环，排除输入框内部 input（边框由 el-input__wrapper 控制） */
+a:focus-visible,
+button:focus-visible,
+input:not(.el-input__inner):focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible,
+.el-menu-item:focus-visible,
+.el-dropdown-item:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* EP 输入框内部元素由 Element Plus 管理边框，不画外层 outline */
+.el-input__inner:focus-visible,
+.el-textarea__inner:focus-visible {
+  outline: none;
+}
+
+/* 全局去除默认 outline，防止元素点击选中时出现紫色边框 */
+*:focus {
+  outline: none;
+}
+
+/* =============================================
+   减少动画偏好设置
+   ============================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

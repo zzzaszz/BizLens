@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiAgentMapper">
+
+    <resultMap type="zzz.service.forum.domain.AiAgentEntity" id="AiAgentMap">
+        <result property="id" column="Id" jdbcType="BIGINT"/>
+        <result property="userid" column="UserId" jdbcType="BIGINT"/>
+        <result property="name" column="Name" jdbcType="VARCHAR"/>
+        <result property="code" column="Code" jdbcType="VARCHAR"/>
+        <result property="model" column="Model" jdbcType="VARCHAR"/>
+        <result property="systemprompt" column="SystemPrompt" jdbcType="VARCHAR"/>
+        <result property="temperature" column="Temperature" jdbcType="DECIMAL"/>
+        <result property="maxtokens" column="MaxTokens" jdbcType="INTEGER"/>
+        <result property="enabled" column="Enabled" jdbcType="INTEGER"/>
+        <result property="issystem" column="IsSystem" jdbcType="INTEGER"/>
+        <result property="avatar" column="Avatar" jdbcType="VARCHAR"/>
+        <result property="provider" column="Provider" jdbcType="VARCHAR"/>
+        <result property="apibaseurl" column="ApiBaseUrl" jdbcType="VARCHAR"/>
+        <result property="apikeyenc" column="ApiKeyEnc" jdbcType="VARCHAR"/>
+        <result property="createdat" column="CreatedAt" jdbcType="TIMESTAMP"/>
+        <result property="updatedat" column="UpdatedAt" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <select id="getById" resultMap="AiAgentMap">
+        select "Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
+               "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
+        from "AiAgent"
+        where "Id" = #{id}
+    </select>
+
+    <select id="listForUser" resultMap="AiAgentMap">
+        select "Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
+               "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
+        from "AiAgent"
+        where "Enabled" = 1
+          and ("IsSystem" = 1 or "UserId" = #{userId})
+        order by "IsSystem" desc, "CreatedAt" desc
+    </select>
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiAgentEntity">
+        insert into "AiAgent"("Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled",
+                            "IsSystem", "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt")
+        values (#{id}, #{userid}, #{name}, #{code}, #{model}, #{systemprompt}, #{temperature}, #{maxtokens},
+                #{enabled}, #{issystem}, #{avatar}, #{provider}, #{apibaseurl}, #{apikeyenc}, #{createdat}, #{updatedat})
+    </insert>
+
+    <update id="update" parameterType="zzz.service.forum.domain.AiAgentEntity">
+        update "AiAgent"
+        <set>
+            <if test="name != null">"Name" = #{name},</if>
+            <if test="code != null">"Code" = #{code},</if>
+            <if test="model != null">"Model" = #{model},</if>
+            <if test="systemprompt != null">"SystemPrompt" = #{systemprompt},</if>
+            <if test="temperature != null">"Temperature" = #{temperature},</if>
+            <if test="maxtokens != null">"MaxTokens" = #{maxtokens},</if>
+            <if test="enabled != null">"Enabled" = #{enabled},</if>
+            <if test="avatar != null">"Avatar" = #{avatar},</if>
+            <if test="provider != null">"Provider" = #{provider},</if>
+            <if test="apibaseurl != null">"ApiBaseUrl" = #{apibaseurl},</if>
+            <if test="apikeyenc != null">"ApiKeyEnc" = #{apikeyenc},</if>
+            "UpdatedAt" = CURRENT_TIMESTAMP
+        </set>
+        where "Id" = #{id}
+    </update>
+
+    <delete id="delete">
+        delete from "AiAgent"
+        where "Id" = #{id}
+    </delete>
+</mapper>

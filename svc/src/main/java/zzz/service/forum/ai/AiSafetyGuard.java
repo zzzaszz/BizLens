@@ -1,0 +1,29 @@
+package zzz.service.forum.ai;
+
+import org.springframework.stereotype.Component;
+
+import java.util.regex.Pattern;
+
+/** AI 输入与输出的最小安全边界。 */
+@Component
+public class AiSafetyGuard {
+
+    private static final Pattern INJECTION = Pattern.compile(
+            "(?i)(ignore\\s+(all|any|previous)|忽略.{0,12}(之前|上面|所有).{0,8}规则|开发者模式|system\\s*prompt|系统提示词|输出.{0,12}(源码|sql|密钥)|把.{0,12}(代码|sql).{0,8}(全部|完整))");
+    private static final Pattern SOURCE = Pattern.compile(
+            "(?is)(^|\\n)\\s*(package\\s+[\\w.]+;|import\\s+[\\w.]+;|select\\s+.+\\s+from|insert\\s+into|update\\s+\\w+\\s+set|delete\\s+from|```(?:java|sql|yaml|json))");
+    private static final Pattern SECRET = Pattern.compile(
+            "(?i)(api[_-]?key|access[_-]?key|private[_-]?key|password|token|secret)\\s*[:=]");
+
+    public boolean isPromptInjection(String text) {
+        return text != null && INJECTION.matcher(text).find();
+    }
+
+    public boolean containsRestrictedOutput(String text) {
+        return text != null && (SOURCE.matcher(text).find() || SECRET.matcher(text).find());
+    }
+
+    public String refusal() {
+        return "我可以解释业务规则、处理流程和数据含义，但不能提供源代码、SQL、配置、密钥或内部路径。";
+    }
+}
