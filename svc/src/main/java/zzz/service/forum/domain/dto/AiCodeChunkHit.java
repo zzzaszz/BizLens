@@ -13,6 +13,12 @@ import java.io.Serializable;
 public class AiCodeChunkHit implements Serializable {
     private static final long serialVersionUID = 1L;
 
+    /** 切片主键，用于合并普通召回与关系扩展结果时去重 */
+    private Long chunkId;
+    /** 切片所属文件文档 */
+    private Long documentId;
+    /** 切片所属代码项目 */
+    private Long projectId;
     /** 文件相对路径 */
     private String path;
     private String language;
@@ -26,4 +32,6 @@ public class AiCodeChunkHit implements Serializable {
     private Integer endLine;
     /** 命中权重，越大越相关 */
     private Integer score;
+    /** 是否由一跳继承关系补充 */
+    private boolean inherited;
 }

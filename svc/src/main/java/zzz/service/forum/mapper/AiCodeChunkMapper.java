@@ -23,4 +23,13 @@ public interface AiCodeChunkMapper {
     List<AiCodeChunkHit> searchByKeywords(@Param("projectIds") List<Long> projectIds,
                                           @Param("keywords") List<String> keywords,
                                           @Param("limit") int limit);
+
+    /**
+     * 在指定项目的父类文件中，按方法符号名补充一跳继承关系命中。
+     * 只查方法切片，不递归继续追踪父类的父类。
+     */
+    List<AiCodeChunkHit> searchInheritedMethods(@Param("projectId") Long projectId,
+                                                 @Param("parentClassName") String parentClassName,
+                                                 @Param("keywords") List<String> keywords,
+                                                 @Param("limit") int limit);
 }

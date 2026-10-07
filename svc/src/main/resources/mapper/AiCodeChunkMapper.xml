@@ -10,6 +10,9 @@
     </insert>
 
     <resultMap id="hitMap" type="zzz.service.forum.domain.dto.AiCodeChunkHit">
+        <result property="chunkId" column="chunk_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="projectId" column="project_id"/>
         <result property="path" column="path"/>
         <result property="language" column="language"/>
         <result property="chunkType" column="chunk_type"/>
@@ -30,7 +33,10 @@
       一个角色可能关联多个项目（例如前后端），所以这里是 IN 而不是等值。
     -->
     <select id="searchByKeywords" resultMap="hitMap">
-        SELECT d.path,
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
                d.language,
                c.chunk_type,
                c.symbol_name,
@@ -67,6 +73,51 @@
           最后再按 id 兜底：同分同长度时数据库的返回顺序是不确定的，
           会让同一个问题两次问出不同结果，排查时无从下手。
         -->
+        ORDER BY score DESC, length(c.source_snippet) DESC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      一跳继承扩展：命中子类文件后，在同一项目中找到同名的 Java/Kotlin 父类文件，
+      只取方法符号名命中检索词的切片。文件名条件同时支持仓库根目录和任意子目录。
+      调用方控制总条数，避免关系扩展挤掉普通召回结果。
+    -->
+    <select id="searchInheritedMethods" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0)   AS end_line,
+               (
+               <foreach collection="keywords" item="kw" separator="+">
+                   (CASE WHEN lower(c.symbol_name) = lower(#{kw}) THEN 8 ELSE 0 END
+                   + CASE WHEN c.symbol_name ILIKE '%' || #{kw} || '%' THEN 5 ELSE 0 END
+                   + CASE WHEN c.source_snippet ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END)
+               </foreach>
+               ) AS score
+        FROM ai_code_chunk c
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE d.project_id = #{projectId}
+          AND c.chunk_type = 'METHOD'
+          AND c.source_snippet IS NOT NULL
+          AND (
+               d.path = #{parentClassName} || '.java'
+               OR d.path = #{parentClassName} || '.kt'
+               OR d.path LIKE '%/' || #{parentClassName} || '.java'
+               OR d.path LIKE '%/' || #{parentClassName} || '.kt'
+          )
+          AND (
+               <foreach collection="keywords" item="kw" separator="OR">
+                   c.symbol_name ILIKE '%' || #{kw} || '%'
+                   OR c.source_snippet ILIKE '%' || #{kw} || '%'
+               </foreach>
+          )
         ORDER BY score DESC, length(c.source_snippet) DESC, c.id ASC
         LIMIT #{limit}
     </select>
