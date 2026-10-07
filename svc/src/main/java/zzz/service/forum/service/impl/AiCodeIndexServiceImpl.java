@@ -77,8 +77,15 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private static final int MAX_SNIPPET_CHARS = 1200;
     /** 每个文件所有切片的源码总量上限，兜住 MAX_SYMBOLS_PER_FILE 带来的最坏情况 */
     private static final int MAX_SNIPPET_CHARS_PER_FILE = 20000;
-    /** FILE 级切片只留文件头，它主要用来提供"这个文件大概是什么"，不需要全量 */
-    private static final int MAX_FILE_HEAD_CHARS = 800;
+    /**
+     * FILE 级切片只留文件头，它主要用来提供"这个文件大概是什么"，不需要全量。
+     * <p>
+     * 从 800 提到 2400：800 字符连 imports 都放不完，控制器这类文件往往刚好切在类声明之后、
+     * 第一个方法之前，看起来像"这个类什么方法都没有"。实测问「这个类的接口有哪些」时，
+     * 模型只能回答"片段在方法注解处就被截断了"。
+     * 代价是每个文件多约 1.6KB（2000 文件的项目约多 3MB），比答不出问题划算。
+     */
+    private static final int MAX_FILE_HEAD_CHARS = 2400;
     private static final Set<String> EXTENSIONS = new HashSet<>(Arrays.asList(
             "java", "kt", "xml", "vue", "js", "ts", "yml", "yaml", "json", "sql"
     ));
@@ -285,8 +292,27 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         return total[0];
     }
 
+    /**
+     * 统一换行符为 {@code \n}。
+     * <p>
+     * 必须做：提取符号时用 {@code split("\\R")} 拆行（{@code \R} 把 {@code \r}、{@code }、
+     * {@code  } 等都当换行），而符号的行号是用"数 {@code \n} 的个数"算出来的。
+     * 文件里只要有一个非 {@code \n} 的换行符，两套口径就错开一格，记录的行号落到空行上，
+     * 取出的"源码片段"只有一个换行符——这批长度为 1 的残片长度最短，
+     * 在召回排序里排最前，会把检索名额全占掉（表现为"问某接口的权限，模型说片段里找不到"）。
+     */
+    private String normalizeLineBreaks(String text) {
+        return text.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace('', '\n')
+                .replace(' ', '\n')
+                .replace(' ', '\n')
+                .replace('\f', '\n')
+                .replace('', '\n');
+    }
+
     private void indexFile(Long projectId, Path root, Path file, long bytes) throws Exception {
-        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        String text = normalizeLineBreaks(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
         String relativePath = root.relativize(file).toString().replace('\\', '/');
         String language = extension(file);
         String checksum = sha256(text);

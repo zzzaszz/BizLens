@@ -42,7 +42,10 @@
                <foreach collection="keywords" item="kw" separator="+">
                    (CASE WHEN c.symbol_name ILIKE '%' || #{kw} || '%' THEN 5 ELSE 0 END
                    + CASE WHEN d.path       ILIKE '%' || #{kw} || '%' THEN 2 ELSE 0 END
-                   + CASE WHEN c.source_snippet ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END)
+                   + CASE WHEN c.source_snippet ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END
+                   -- 符号名与检索词完全相同再加一档：getEntity 应压过 getEntityByCode 这类同名前缀，
+                   -- 否则一个通用方法名（getEntity）会被几十个派生名挤掉名额
+                   + CASE WHEN lower(c.symbol_name) = lower(#{kw}) THEN 3 ELSE 0 END)
                </foreach>
                ) AS score
         FROM ai_code_chunk c
@@ -57,7 +60,14 @@
                    OR c.source_snippet ILIKE '%' || #{kw} || '%'
                </foreach>
           )
-        ORDER BY score DESC, length(c.source_snippet) ASC
+        <!--
+          同分时**取更长的片段**，不要按长度升序：
+          升序会把最短（往往最没用）的排在前面——实测 1 个换行符的残片就靠这条把名额占满了。
+          同分下更长的片段至少上下文更完整。
+          最后再按 id 兜底：同分同长度时数据库的返回顺序是不确定的，
+          会让同一个问题两次问出不同结果，排查时无从下手。
+        -->
+        ORDER BY score DESC, length(c.source_snippet) DESC, c.id ASC
         LIMIT #{limit}
     </select>
 </mapper>
