@@ -221,13 +221,16 @@ docs/    项目开发文档与开发日志
    问「`/system/SYSM03B4/getEntity` 的接口权限」，`@PreAuthorize` 在父类 `PipermissionController`
    上，能否答对取决于父类切片有没有撞进 6 个召回名额（实测一次答对、一次答错）。
    实现要点：`AiCodeChunkHit` 需要带上 `documentId` / `projectId`（现在没有），
-   再按 `项目 + 文件名` 找到父类文档、取其符号名命中检索词的方法切片；
+   再按 `项目 + 文件名` 找到父类文档、取其符号名命中检索词的方法切片；比如代码关联检索 / 二次召回机制。比如:关键词检索-> 发现
+   extends PipermissionController->自动检索。
+   PipermissionController ->发现 getEntity->继续获取父类方法和注解->交给 AI
    只做一跳、不递归，并限制条数避免挤掉原有命中。详见 `docs/测试文档.md` 5.13。
 7. 持久化 `ai_security_audit` 审计记录并增加权限分级、告警和运营监控。
 8. 列表接口分页。`pagehelper` 因与 mybatis-plus 的版本冲突已移除，`/ai/conversations`、
    `/ai/project/list`、`/ai/agent/list` 目前都是全量返回，数据量上来后需要补分页。
-9. 应该增加关键词检索能力，代码关联检索 / 二次召回机制。比如:关键词检索-> 发现 extends PipermissionController->自动检索
-   PipermissionController ->发现 getEntity->继续获取父类方法和注解->交给 AI
+9. 文件级完整检索，1、用户要求“某个文件全部接口/方法”时，不使用有限 chunk 召回2、直接获取目标文件完整内容或完整方法摘要
+   支持： “列出 PipermissionController 全部接口”  “列出这个 Controller 所有方法” “这个文件有哪些接口” 防止因 chunk 未全部召回导致遗漏接口
+10. 方法调用链检索：Controller → Service → Mapper → SQL、支持继续向下追踪
 
 ### 已知限制与待优化
 
