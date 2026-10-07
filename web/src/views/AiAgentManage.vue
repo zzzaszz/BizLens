@@ -7,7 +7,7 @@ export default { name: 'AiAgentManage' }
     <div class="page-head">
       <div>
         <h2>AI 角色</h2>
-        <p>角色由代码项目创建——一个项目可以配置多个角色，且必须配置 API Key 才能发起对话</p>
+        <p>角色关联一个或多个代码项目（前后端可共用一个角色），且必须配置 API Key 才能发起对话</p>
       </div>
       <el-button type="primary" :icon="Plus" :disabled="!creatableProjects.length" @click="openCreate">
         {{ createButtonText }}
@@ -28,8 +28,9 @@ export default { name: 'AiAgentManage' }
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="所属项目" min-width="200" show-overflow-tooltip>
-        <template #default="{ row }">{{ projectName(row.projectid) }}</template>
+      <!-- 一个角色可以关联多个项目（例如前后端共用一个角色） -->
+      <el-table-column label="关联项目" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">{{ projectNames(row.projectIds) }}</template>
       </el-table-column>
       <el-table-column label="模型" width="150">
         <template #default="{ row }">{{ row.model || '默认' }}</template>
@@ -53,18 +54,21 @@ export default { name: 'AiAgentManage' }
     <!-- 创建 / 编辑角色弹窗；align-center 让弹窗垂直居中 -->
     <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" align-center :append-to-body="true">
       <el-form label-width="90px">
-        <el-form-item label="所属项目" required>
-          <el-select v-if="!form.id" v-model="form.projectId" placeholder="选择代码项目" style="width:100%">
+        <el-form-item label="关联项目" required>
+          <el-select v-model="form.projectIds" multiple collapse-tags collapse-tags-tooltip
+            placeholder="可多选：一个角色可以覆盖多个项目（如前端 + 后端）" style="width:100%">
             <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id"
               :disabled="p.status !== 'READY'">
               <span>{{ p.name }}</span>
               <span class="opt-meta">{{ projectStatusText(p.status) }}</span>
             </el-option>
           </el-select>
-          <p v-if="!form.id && projects.some(p => p.status !== 'READY')" class="dialog-tip-inline">
-            灰显的项目尚未完成索引：知识库没有内容时角色答不出业务问题，请先在「代码项目」页排队索引
+          <p class="dialog-tip-inline">
+            角色会在所选的<b>全部项目</b>里检索知识库，所以项目必须都已完成索引。
+            <template v-if="projects.some(p => p.status !== 'READY')">
+              灰显的项目尚未完成索引，请先在「代码项目」页排队索引。
+            </template>
           </p>
-          <el-input v-else :model-value="projectName(form.projectId)" disabled />
         </el-form-item>
 
         <el-form-item label="名称" required>
@@ -126,7 +130,31 @@ export default { name: 'AiAgentManage' }
           </p>
         </el-form-item>
 
-        <el-form-item label="采样温度">
+        <el-form-item>
+          <!-- 标签里带问号：温度该填多少没有标准答案，把分场景的推荐值直接挂在旁边 -->
+          <template #label>
+            <span class="label-with-help">
+              采样温度
+              <el-tooltip placement="top" :show-after="100" :width="300">
+                <template #content>
+                  <div class="temp-tip">
+                    <p class="temp-tip-intro">
+                      温度越低回答越稳定、越贴事实，越高越发散。按用途选一个区间即可，不确定就用默认 0.7。
+                    </p>
+                    <table class="temp-tip-table">
+                      <tbody>
+                        <tr v-for="t in TEMPERATURE_TIPS" :key="t.scene">
+                          <td>{{ t.scene }}</td>
+                          <td class="temp-tip-value">{{ t.range }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
+          </template>
           <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" :precision="2" />
         </el-form-item>
       </el-form>
@@ -142,7 +170,7 @@ export default { name: 'AiAgentManage' }
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, QuestionFilled } from '@element-plus/icons-vue'
 import {
   aiAgentList, aiAgentCreate, aiAgentUpdate, aiAgentDelete, aiAgentModels,
   aiCreateConversation, aiConversations, codeProjectList
@@ -165,6 +193,20 @@ const modelHint = ref('')
 const defaultMark = '#2563EB'
 const form = ref(emptyForm())
 
+/** 采样温度的分场景推荐值，挂在标签的问号 tooltip 里 */
+const TEMPERATURE_TIPS = [
+  { scene: 'SQL', range: '0～0.2' },
+  { scene: 'Java / JS 编程', range: '0～0.3' },
+  { scene: '技术问题', range: '0～0.3' },
+  { scene: '数据分析', range: '0～0.3' },
+  { scene: '数学计算', range: '0～0.2' },
+  { scene: '文档编写', range: '0.3～0.6' },
+  { scene: '普通聊天', range: '0.5～0.8' },
+  { scene: '头脑风暴', range: '0.7～1.0' },
+  { scene: '小说/创意写作', range: '0.8～1.2' },
+  { scene: '创意广告文案', range: '0.8～1.2' }
+]
+
 /** 厂商选项；baseUrl 在切换厂商时自动带入「接口地址」，custom 留空强制手填 */
 const PROVIDERS = [
   { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com' },
@@ -175,7 +217,7 @@ const PROVIDERS = [
 
 function emptyForm() {
   return {
-    id: null, projectId: null, name: '', avatar: '', systemPrompt: '',
+    id: null, projectIds: [], name: '', avatar: '', systemPrompt: '',
     provider: 'deepseek', apiBaseUrl: 'https://api.deepseek.com',
     model: '', temperature: 0.7, apiKey: '', apikeyenc: ''
   }
@@ -204,6 +246,17 @@ const createButtonText = computed(() => {
 function projectName(projectId) {
   const p = projects.value.find(x => x.id === projectId)
   return p ? p.name : '—'
+}
+
+/** 角色关联的多个项目名；空数组说明角色还没关联项目 */
+function projectNames(projectIds) {
+  if (!projectIds || !projectIds.length) return '未关联项目'
+  return projectIds.map(projectName).join('、')
+}
+
+/** 角色关联的项目实体（找不到的会被过滤掉，例如项目已删除） */
+function linkedProjects(agent) {
+  return (agent.projectIds || []).map(id => projects.value.find(p => p.id === id)).filter(Boolean)
 }
 
 function projectStatusText(status) {
@@ -280,10 +333,10 @@ function openCreate() {
   // 从「代码项目」页带着 projectId 跳过来时直接预选该项目
   const fromQuery = queryProjectId()
   if (fromQuery && creatableProjects.value.some(p => String(p.id) === fromQuery)) {
-    form.value.projectId = fromQuery
+    form.value.projectIds = [fromQuery]
   } else if (creatableProjects.value.length === 1) {
     // 只剩一个可选项目时也直接预选，少点一次
-    form.value.projectId = creatableProjects.value[0].id
+    form.value.projectIds = [creatableProjects.value[0].id]
   }
   formVisible.value = true
   // 此时还没有 Key，后端会回退预置列表，先把下拉填上
@@ -292,7 +345,7 @@ function openCreate() {
 
 function openEdit(a) {
   form.value = {
-    id: a.id, projectId: a.projectid, name: a.name, avatar: a.avatar || '',
+    id: a.id, projectIds: [...(a.projectIds || [])], name: a.name, avatar: a.avatar || '',
     systemPrompt: a.systemprompt || '', model: a.model || '',
     provider: a.provider || 'deepseek', apiBaseUrl: a.apibaseurl || '',
     temperature: a.temperature != null ? Number(a.temperature) : 0.7, apiKey: '',
@@ -306,8 +359,8 @@ function openEdit(a) {
 }
 
 async function saveAgent() {
-  if (!form.value.id && !form.value.projectId) {
-    ElMessage.warning('请选择所属项目'); return
+  if (!form.value.projectIds || !form.value.projectIds.length) {
+    ElMessage.warning('请至少选择一个关联项目'); return
   }
   if (!form.value.name || !form.value.name.trim()) {
     ElMessage.warning('请填写角色名称'); return
@@ -318,7 +371,7 @@ async function saveAgent() {
   saving.value = true
   try {
     const data = {
-      projectId: form.value.projectId,
+      projectIds: form.value.projectIds,
       name: form.value.name.trim(),
       avatar: form.value.avatar || null,
       systemPrompt: form.value.systemPrompt || null,
@@ -375,9 +428,16 @@ async function startChat(a) {
     openEdit(a)
     return
   }
-  const project = projects.value.find(p => p.id === a.projectid)
-  if (!project || project.status !== 'READY') {
-    ElMessage.warning(`项目「${project ? project.name : '—'}」尚未完成索引，请先排队索引`)
+  // 角色可能关联多个项目，任意一个没就绪都会让知识库缺一块，所以全部要就绪
+  const linked = linkedProjects(a)
+  if (!linked.length) {
+    ElMessage.warning('该角色未关联代码项目，请先在编辑里关联至少一个项目')
+    openEdit(a)
+    return
+  }
+  const notReady = linked.find(p => p.status !== 'READY')
+  if (notReady) {
+    ElMessage.warning(`关联项目「${notReady.name}」尚未完成索引，请先排队索引`)
     router.push('/projects')
     return
   }
@@ -446,6 +506,17 @@ onMounted(async () => {
 .model-hint.warn { color: var(--warning-color); }
 
 .opt-meta { float: right; color: var(--text-muted); font-size: 12px; }
+
+/* 「采样温度」标签旁的问号：鼠标移上去看推荐值 */
+.label-with-help { display: inline-flex; align-items: center; gap: 4px; }
+.help-icon { color: var(--text-muted); cursor: help; font-size: 13px; }
+.help-icon:hover { color: var(--primary-color); }
+
+/* tooltip 是深色底，正文用浅色，别用页面上的深灰 */
+.temp-tip-intro { margin: 0 0 8px; line-height: 1.6; color: rgba(255, 255, 255, .78); }
+.temp-tip-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.temp-tip-table td { padding: 2px 0; line-height: 1.7; color: #fff; }
+.temp-tip-value { text-align: right; padding-left: 16px; font-variant-numeric: tabular-nums; }
 
 /* API Key 当前状态提示：编辑弹窗里输入框必然是空的，靠这行说明"其实已经配了" */
 .key-state { width: 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.6; }

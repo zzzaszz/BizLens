@@ -152,10 +152,10 @@ public class AiServiceImpl implements AiService {
 
         // 2. 先校验凭据再组装上下文——知识库召回要多花一次模型调用，没配好就不该发起
         AiRequest aiRequest = buildAiRequest(agent, new ArrayList<>());
-        AiCodeProjectEntity project = ensureChatReady(agent, aiRequest);
+        List<AiCodeProjectEntity> projects = ensureChatReady(agent, aiRequest);
 
         // 3. 组装 messages = 角色设定 + 知识库召回 + 热上下文最近 N 条 + 当前问题
-        aiRequest.setMessages(buildMessages(conv, agent, project, aiRequest, request.getMessage()));
+        aiRequest.setMessages(buildMessages(conv, agent, projects, aiRequest, request.getMessage()));
 
         // 4. 调用模型
         String reply;
@@ -190,10 +190,10 @@ public class AiServiceImpl implements AiService {
 
             // 2. 先校验凭据再组装上下文——知识库召回要多花一次模型调用，没配好就不该发起
             AiRequest aiRequest = buildAiRequest(agent, new ArrayList<>());
-            AiCodeProjectEntity project = ensureChatReady(agent, aiRequest);
+            List<AiCodeProjectEntity> projects = ensureChatReady(agent, aiRequest);
 
             // 3. 组装 messages = 角色设定 + 知识库召回 + 热上下文 + 当前问题
-            aiRequest.setMessages(buildMessages(conv, agent, project, aiRequest, request.getMessage()));
+            aiRequest.setMessages(buildMessages(conv, agent, projects, aiRequest, request.getMessage()));
 
             // 4. 流式调用：增量即时推送，累积的同时做安全拦截，完成后落库
             StringBuilder reply = new StringBuilder();
@@ -367,23 +367,35 @@ public class AiServiceImpl implements AiService {
      * 组装 messages = system(角色设定或内置默认) + system(知识库召回) + 热上下文最近 N 条 + 当前问题。
      * <p>
      * 召回会多花一次模型调用（把中文问题改写成候选标识符），因此调用方必须已通过 ensureChatReady。
+     * 角色可以关联多个项目（如前后端共用一个角色），召回在全部关联项目内一起做。
      */
     private List<AiMessage> buildMessages(AiConversationEntity conv, AiAgentEntity agent,
-                                          AiCodeProjectEntity project, AiRequest aiRequest, String message) {
+                                          List<AiCodeProjectEntity> projects, AiRequest aiRequest, String message) {
         List<AiMessage> messages = new ArrayList<>();
 
         String systemPrompt = agent.getSystemprompt();
         messages.add(AiMessage.system(
                 systemPrompt != null && !systemPrompt.isEmpty() ? systemPrompt : DEFAULT_SYSTEM_PROMPT));
 
-        // 知识库召回：把项目内相关源码片段喂给模型，让它能真正回答业务问题
+        List<Long> projectIds = new ArrayList<>();
+        StringBuilder names = new StringBuilder();
+        for (AiCodeProjectEntity project : projects) {
+            projectIds.add(project.getId());
+            if (names.length() > 0) {
+                names.append('、');
+            }
+            names.append(project.getName());
+        }
+        String projectLabel = names.toString();
+
+        // 知识库召回：把关联项目内相关源码片段喂给模型，让它能真正回答业务问题
         List<AiCodeChunkHit> hits = aiCodeRetrievalService.retrieve(
-                project.getId(), message, agent.getModel(),
+                projectIds, message, agent.getModel(),
                 aiRequest.getApiKey(), agent.getApibaseurl(), agent.getProvider());
         String context = aiCodeRetrievalService.buildContext(hits);
         messages.add(AiMessage.system(context != null
-                ? String.format(KNOWLEDGE_PREFIX, project.getName()) + context
-                : String.format(NO_KNOWLEDGE_HINT, project.getName())));
+                ? String.format(KNOWLEDGE_PREFIX, projectLabel) + context
+                : String.format(NO_KNOWLEDGE_HINT, projectLabel)));
 
         for (AiChatMessageEntity h : aiChatMessageService.loadHistoryCached(conv.getId(), CONTEXT_RECENT)) {
             messages.add("AI".equalsIgnoreCase(h.getSendertype())
@@ -414,26 +426,36 @@ public class AiServiceImpl implements AiService {
     }
 
     /**
-     * 发起对话前的校验，两项缺一不可：
+     * 发起对话前的校验，三项缺一不可：
      * <ol>
      *   <li>角色必须配置 API Key——不再回退服务端 DEEPSEEK_API_KEY，避免"没填 Key 也能对话"</li>
-     *   <li>角色所属项目必须已完成索引（READY），否则知识库里没有片段、回答没有依据</li>
+     *   <li>角色至少关联一个代码项目</li>
+     *   <li>关联项目必须全部已完成索引（READY）——只要有一个没索引好，
+     *       召回就会缺一块，回答会出现"只看到一半代码"的误导性结论，所以宁可拦住</li>
      * </ol>
      * Git 凭据不在此校验：公开仓库无需凭据，凭据只在索引任务克隆时按需使用。
      *
-     * @return 角色所属项目，后续组装上下文要用
+     * @return 角色关联的项目列表，后续组装上下文要用
      */
-    private AiCodeProjectEntity ensureChatReady(AiAgentEntity agent, AiRequest request) {
+    private List<AiCodeProjectEntity> ensureChatReady(AiAgentEntity agent, AiRequest request) {
         if (request.getApiKey() == null || request.getApiKey().isEmpty()) {
             throw new BaseBusinessException("请先为角色配置 API Key");
         }
-        AiCodeProjectEntity project = aiCodeProjectService.getById(agent.getProjectid());
-        if (project == null) {
-            throw new BaseBusinessException("角色所属代码项目不存在或已删除");
+        List<Long> projectIds = agent.getProjectIds();
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new BaseBusinessException("角色未关联代码项目：请先在「AI 角色」页为它关联至少一个项目");
         }
-        if (!"READY".equals(project.getStatus())) {
-            throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
+        List<AiCodeProjectEntity> projects = new ArrayList<>();
+        for (Long projectId : projectIds) {
+            AiCodeProjectEntity project = aiCodeProjectService.getById(projectId);
+            if (project == null) {
+                throw new BaseBusinessException("角色关联的代码项目不存在或已删除，请到「AI 角色」页重新关联");
+            }
+            if (!"READY".equals(project.getStatus())) {
+                throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
+            }
+            projects.add(project);
         }
-        return project;
+        return projects;
     }
 }

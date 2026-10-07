@@ -9,8 +9,10 @@ import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiAgentRequest;
 import zzz.service.forum.domain.dto.AiModelListRequest;
+import zzz.service.forum.domain.dto.AiAgentProjectRef;
 import zzz.service.forum.domain.dto.AiModelListResponse;
 import zzz.service.forum.mapper.AiAgentMapper;
+import zzz.service.forum.mapper.AiAgentProjectMapper;
 import zzz.service.forum.service.AiAgentService;
 import zzz.service.forum.service.AiCodeProjectService;
 import zzz.service.forum.utils.BaseBusinessException;
@@ -19,7 +21,9 @@ import zzz.service.forum.utils.SnowflakeIdGenerator;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,20 +59,94 @@ public class AiAgentServiceImpl implements AiAgentService {
     private CryptoService cryptoService;
     @Resource
     private AiProvider aiProvider;
+    @Resource
+    private AiAgentProjectMapper agentProjectMapper;
+
+    /**
+     * 校验并规整关联项目：至少一个、都归当前用户、都已完成索引；去重且保持传入顺序。
+     * <p>
+     * 项目未就绪就建角色的话，知识库里没有内容，回答只会凭空编造，
+     * 所以与其等用户发第一条消息才报错，不如在创建/编辑这一步就拦住。
+     */
+    private List<Long> validateProjects(Long userId, List<Long> projectIds) {
+        List<Long> distinct = new ArrayList<>();
+        if (projectIds != null) {
+            for (Long id : projectIds) {
+                if (id != null && !distinct.contains(id)) {
+                    distinct.add(id);
+                }
+            }
+        }
+        if (distinct.isEmpty()) {
+            throw new BaseBusinessException("请至少选择一个代码项目：角色必须由代码项目创建");
+        }
+        for (Long projectId : distinct) {
+            AiCodeProjectEntity project = aiCodeProjectService.getOwned(userId, projectId);
+            if (!"READY".equals(project.getStatus())) {
+                throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
+            }
+        }
+        return distinct;
+    }
+
+    /**
+     * 填充关联项目ID（该字段不在 "AiAgent" 表上，来自关联表）。
+     * <p>
+     * 单条查询时 userId 传 null，按角色逐个查；
+     * 列表查询时传 userId，一次性把该用户全部关联查出来再分组，避免逐条查询。
+     */
+    private void fillProjectIds(List<AiAgentEntity> agents, Long userId) {
+        if (agents == null || agents.isEmpty()) {
+            return;
+        }
+        if (userId == null) {
+            for (AiAgentEntity agent : agents) {
+                if (agent != null) {
+                    agent.setProjectIds(agentProjectMapper.listProjectIds(agent.getId()));
+                }
+            }
+            return;
+        }
+        Map<Long, List<Long>> grouped = new HashMap<>();
+        List<AiAgentProjectRef> refs = agentProjectMapper.listRefsByUser(userId);
+        if (refs != null) {
+            for (AiAgentProjectRef ref : refs) {
+                grouped.computeIfAbsent(ref.getAgentId(), k -> new ArrayList<>()).add(ref.getProjectId());
+            }
+        }
+        for (AiAgentEntity agent : agents) {
+            if (agent != null) {
+                agent.setProjectIds(grouped.getOrDefault(agent.getId(), new ArrayList<>()));
+            }
+        }
+    }
 
     @Override
     public AiAgentEntity getById(Long id) {
-        return id == null ? null : aiAgentMapper.getById(id);
+        if (id == null) {
+            return null;
+        }
+        AiAgentEntity agent = aiAgentMapper.getById(id);
+        fillProjectIds(Collections.singletonList(agent), null);
+        return agent;
     }
 
     @Override
     public List<AiAgentEntity> listByProjectId(Long projectId) {
-        return projectId == null ? Collections.emptyList() : aiAgentMapper.listByProjectId(projectId);
+        if (projectId == null) {
+            return Collections.emptyList();
+        }
+        List<AiAgentEntity> agents = aiAgentMapper.listByProjectId(projectId);
+        // 走关联表查出来的角色同样要带上完整的项目列表（可能要显示"还关联了哪些项目"）
+        fillProjectIds(agents, null);
+        return agents;
     }
 
     @Override
     public List<AiAgentEntity> listForUser(Long userId) {
-        return aiAgentMapper.listForUser(userId);
+        List<AiAgentEntity> agents = aiAgentMapper.listForUser(userId);
+        fillProjectIds(agents, userId);
+        return agents;
     }
 
     @Override
@@ -76,25 +154,15 @@ public class AiAgentServiceImpl implements AiAgentService {
         if (request.getName() == null || request.getName().trim().isEmpty()) {
             throw new BaseBusinessException("角色名称不能为空");
         }
-        // 业务规则一：角色必须由代码项目创建（一个项目可以配置多个角色，不再限制数量）
-        Long projectId = request.getProjectId();
-        if (projectId == null) {
-            throw new BaseBusinessException("请先选择代码项目：角色必须由代码项目创建");
-        }
-        AiCodeProjectEntity project = aiCodeProjectService.getOwned(userId, projectId);
-        // 业务规则二：项目必须已完成索引。知识库没内容时建了角色也答不了，
-        // 与其等用户发第一条消息才报错，不如在创建这一步就拦住。
-        if (!"READY".equals(project.getStatus())) {
-            throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
-        }
-        // 业务规则三：API Key 必填，没有 Key 的角色无法发起对话
+        // 业务规则一：角色必须关联至少一个代码项目，且项目归当前用户、已完成索引
+        List<Long> projectIds = validateProjects(userId, request.getProjectIds());
+        // 业务规则二：API Key 必填，没有 Key 的角色无法发起对话
         if (request.getApiKey() == null || request.getApiKey().trim().isEmpty()) {
             throw new BaseBusinessException("请填写 API Key：角色必须配置 API Key 才能发起对话");
         }
         AiAgentEntity entity = new AiAgentEntity();
         entity.setId(snowflakeIdGenerator.nextId());
         entity.setUserid(userId);
-        entity.setProjectid(projectId);
         entity.setName(request.getName().trim());
         entity.setCode(request.getCode());
         entity.setModel(request.getModel());
@@ -112,6 +180,8 @@ public class AiAgentServiceImpl implements AiAgentService {
         entity.setCreatedat(now);
         entity.setUpdatedat(now);
         aiAgentMapper.insert(entity);
+        agentProjectMapper.insertBatch(entity.getId(), projectIds);
+        entity.setProjectIds(projectIds);
         return entity;
     }
 
@@ -124,10 +194,13 @@ public class AiAgentServiceImpl implements AiAgentService {
         if (exist == null) {
             throw new BaseBusinessException("角色不存在");
         }
-        // 仅创建者本人可编辑；所属项目为 1:1 绑定关系，编辑时不可改绑
+        // 仅创建者本人可编辑
         if (!userId.equals(exist.getUserid())) {
             throw new BaseBusinessException("无权编辑他人创建的角色");
         }
+        // 关联项目整体替换：传了才动，没传（null）表示不改动关联
+        List<Long> projectIds = request.getProjectIds() == null
+                ? null : validateProjects(userId, request.getProjectIds());
 
         AiAgentEntity entity = new AiAgentEntity();
         entity.setId(request.getId());
@@ -146,7 +219,11 @@ public class AiAgentServiceImpl implements AiAgentService {
             entity.setApikeyenc(cryptoService.encrypt(request.getApiKey()));
         }
         aiAgentMapper.update(entity);
-        return aiAgentMapper.getById(request.getId());
+        if (projectIds != null) {
+            agentProjectMapper.deleteByAgent(request.getId());
+            agentProjectMapper.insertBatch(request.getId(), projectIds);
+        }
+        return getById(request.getId());
     }
 
     @Override

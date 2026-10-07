@@ -12,6 +12,7 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * AI 消息服务实现类
@@ -23,6 +24,14 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
     private static final String REDIS_HISTORY_PREFIX = "ai:conversation:";
     /** 热上下文保留的最大消息条数 */
     private static final int REDIS_HISTORY_MAX = 50;
+    /**
+     * 热上下文存活时长（天）。
+     * <p>
+     * 不设 TTL 的话，每个聊过的会话都会永久占一份内存（最多 50 条消息）——
+     * 删会话会清、但关闭会话不会，于是只增不减。到期自然淘汰的代价只是下次多查一次库。
+     * 每次写入都会续期，所以活跃会话不会被中途清掉。
+     */
+    private static final long REDIS_HISTORY_TTL_DAYS = 7;
 
     @Resource
     private AiChatMessageMapper aiChatMessageMapper;
@@ -91,7 +100,8 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
         if (cached.size() > REDIS_HISTORY_MAX) {
             cached = new ArrayList<>(cached.subList(cached.size() - REDIS_HISTORY_MAX, cached.size()));
         }
-        redisService.setCacheObject(REDIS_HISTORY_PREFIX + conversationId, cached);
+        redisService.setCacheObject(REDIS_HISTORY_PREFIX + conversationId, cached,
+                TimeUnit.DAYS.toSeconds(REDIS_HISTORY_TTL_DAYS), TimeUnit.SECONDS);
         return entity;
     }
 
@@ -105,7 +115,8 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
         List<AiChatMessageEntity> history = aiChatMessageMapper.listByConversation(conversationId);
         if (history != null && !history.isEmpty()) {
             List<AiChatMessageEntity> store = tail(history, REDIS_HISTORY_MAX);
-            redisService.setCacheObject(REDIS_HISTORY_PREFIX + conversationId, store);
+            redisService.setCacheObject(REDIS_HISTORY_PREFIX + conversationId, store,
+                    TimeUnit.DAYS.toSeconds(REDIS_HISTORY_TTL_DAYS), TimeUnit.SECONDS);
             return tail(store, limit);
         }
         return new ArrayList<>();

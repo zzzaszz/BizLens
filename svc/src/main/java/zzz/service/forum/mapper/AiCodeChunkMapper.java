@@ -13,13 +13,14 @@ public interface AiCodeChunkMapper {
     int insert(AiCodeChunkEntity entity);
 
     /**
-     * 按项目 + 关键词召回带源码的切片。
+     * 按项目集合 + 关键词召回带源码的切片。
      *
-     * @param projectId 限定在哪个代码项目内检索
-     * @param keywords  候选标识符，<b>不能为空</b>（为空会生成非法 SQL）
-     * @param limit     最多返回多少条
+     * @param projectIds 限定在哪些代码项目内检索。<b>不能为空</b>——
+     *                   角色可以关联多个项目（如前后端共用一个角色），这里一次覆盖全部
+     * @param keywords   候选标识符，<b>不能为空</b>（为空会生成非法 SQL）
+     * @param limit      最多返回多少条
      */
-    List<AiCodeChunkHit> searchByKeywords(@Param("projectId") Long projectId,
+    List<AiCodeChunkHit> searchByKeywords(@Param("projectIds") List<Long> projectIds,
                                           @Param("keywords") List<String> keywords,
                                           @Param("limit") int limit);
 }

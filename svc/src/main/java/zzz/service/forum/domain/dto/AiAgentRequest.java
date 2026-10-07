@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * 创建 / 编辑 AI 角色请求
@@ -14,8 +15,11 @@ public class AiAgentRequest implements Serializable {
 
     /** 角色ID（编辑时必传） */
     private Long id;
-    /** 所属代码项目ID（创建时必传；编辑时忽略，不允许改绑） */
-    private Long projectId;
+    /**
+     * 关联的代码项目ID（至少一个）。角色与项目多对多：可以一次覆盖多个项目，
+     * 例如前端和后端两个仓库共用一个角色。编辑时整体替换。
+     */
+    private List<Long> projectIds;
     /** 角色名称 */
     private String name;
     /** 角色编码（可空） */

@@ -5,6 +5,7 @@ import lombok.Data;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.Date;
+import java.util.List;
 
 /**
  * AI 角色表(AiAgent)实体类
@@ -17,8 +18,12 @@ public class AiAgentEntity implements Serializable {
     private Long id;
     /** 创建者ID */
     private Long userid;
-    /** 所属代码项目ID（角色必须由项目创建，一个项目可以配置多个角色） */
-    private Long projectid;
+    /**
+     * 关联的代码项目ID列表。角色与项目是多对多：一个角色可以覆盖多个项目
+     * （例如前后端共用一个角色）。该字段不落在 "AiAgent" 表上，来自 ai_agent_project 关联表，
+     * 由 Service 层填充。
+     */
+    private List<Long> projectIds;
     /** 角色名称 */
     private String name;
     /** 角色编码 */

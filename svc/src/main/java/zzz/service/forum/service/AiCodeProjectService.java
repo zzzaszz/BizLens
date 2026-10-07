@@ -20,5 +20,13 @@ public interface AiCodeProjectService {
 
     AiCodeProjectEntity queueIndex(Long userId, Long projectId);
 
+    /**
+     * 一键把当前用户的全部项目重新排队索引。
+     * 正在索引的项目会跳过（同一项目跑两个索引任务会互相覆盖切片数据）。
+     *
+     * @return { total, queued, skipped, skippedNames }
+     */
+    java.util.Map<String, Object> queueIndexAll(Long userId);
+
     boolean delete(Long userId, Long projectId);
 }

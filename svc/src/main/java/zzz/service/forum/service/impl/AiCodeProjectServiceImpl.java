@@ -7,21 +7,30 @@ import zzz.service.forum.mapper.AiCodeProjectMapper;
 import zzz.service.forum.service.AiCodeProjectService;
 import zzz.service.forum.service.AiCodeIndexService;
 import zzz.service.forum.utils.BaseBusinessException;
+import zzz.service.forum.utils.CryptoService;
 import zzz.service.forum.utils.SnowflakeIdGenerator;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service("aiCodeProjectService")
 public class AiCodeProjectServiceImpl implements AiCodeProjectService {
 
+    @Resource
+    private CryptoService cryptoService;
+
     /**
-     * 判定"索引任务还活着"的时间窗（分钟）。
-     * 超过这个时长状态仍停在 QUEUED/INDEXING，就认为上一轮任务已随进程异常退出，
-     * 允许重新排队——否则状态会永久卡住且没有任何出口。
+     * 判定"索引任务还活着"的时间窗（秒）。
+     * <p>
+     * 必须与 {@code AiCodeIndexServiceImpl.HEARTBEAT_GRACE_SECONDS} 一致：
+     * 索引运行期间每 30 秒会推一次心跳，所以超过这个时长没动静就说明进程已经没了。
+     * 两处取不同值时会出现"前端显示可重新索引、后端却拒绝"的矛盾。
      */
-    private static final int STUCK_MINUTES = 10;
+    private static final int STUCK_SECONDS = 180;
 
     @Resource
     private AiCodeProjectMapper projectMapper;
@@ -53,7 +62,9 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
         entity.setName(request.getName().trim());
         entity.setGitUrl(request.getGitUrl().trim());
         entity.setGitBranch(normalizeBranch(request.getGitBranch()));
-        entity.setCredentialRef(blankToNull(request.getCredentialRef()));
+        // 令牌加密后落库；公开仓库留空即可
+        entity.setCredentialEnc(cryptoService.encrypt(blankToNull(request.getCredentialToken())));
+        entity.setCredentialUser(blankToNull(request.getCredentialUser()));
         entity.setStatus("PENDING");
         entity.setCreatedBy(userId);
         Date now = new Date();
@@ -75,7 +86,14 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
         entity.setName(request.getName().trim());
         entity.setGitUrl(request.getGitUrl().trim());
         entity.setGitBranch(normalizeBranch(request.getGitBranch()));
-        entity.setCredentialRef(blankToNull(request.getCredentialRef()));
+        // 令牌留空表示不修改（编辑时前端不回显明文）
+        String token = blankToNull(request.getCredentialToken());
+        if (token != null) {
+            entity.setCredentialEnc(cryptoService.encrypt(token));
+        }
+        // 用户名总是覆盖：mapper 里 null 会被跳过，所以用空串表达"清空、回落到平台默认"
+        String user = blankToNull(request.getCredentialUser());
+        entity.setCredentialUser(user == null ? "" : user);
         projectMapper.update(entity);
         return projectMapper.getById(entity.getId());
     }
@@ -90,6 +108,29 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
         projectMapper.updateStatus(projectId, "QUEUED");
         indexService.indexAsync(projectId);
         return projectMapper.getById(projectId);
+    }
+
+    @Override
+    public Map<String, Object> queueIndexAll(Long userId) {
+        List<AiCodeProjectEntity> projects = projectMapper.listByUser(userId);
+        List<String> skippedNames = new ArrayList<>();
+        int queued = 0;
+        for (AiCodeProjectEntity project : projects) {
+            // 正在索引的跳过：同一个项目并发跑两个索引任务，两次都会"先按项目删再全量写"，互相覆盖
+            if (isIndexRunning(project)) {
+                skippedNames.add(project.getName());
+                continue;
+            }
+            projectMapper.updateStatus(project.getId(), "QUEUED");
+            indexService.indexAsync(project.getId());
+            queued++;
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", projects.size());
+        result.put("queued", queued);
+        result.put("skipped", skippedNames.size());
+        result.put("skippedNames", skippedNames);
+        return result;
     }
 
     /**
@@ -107,9 +148,9 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
         if (updatedAt == null) {
             return false;
         }
-        long elapsedMinutes = (System.currentTimeMillis() - updatedAt.getTime()) / 60000L;
+        long elapsedSeconds = (System.currentTimeMillis() - updatedAt.getTime()) / 1000L;
         // 时钟回拨导致 elapsed 为负时按"还在跑"处理，宁可让用户多等也不要并发跑两个任务
-        return elapsedMinutes < STUCK_MINUTES;
+        return elapsedSeconds < STUCK_SECONDS;
     }
 
     @Override

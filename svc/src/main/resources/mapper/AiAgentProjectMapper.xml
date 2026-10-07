@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiAgentProjectMapper">
+
+    <insert id="insertBatch">
+        insert into ai_agent_project (agent_id, project_id)
+        values
+        <foreach collection="projectIds" item="pid" separator=",">
+            (#{agentId}, #{pid})
+        </foreach>
+        on conflict do nothing
+    </insert>
+
+    <delete id="deleteByAgent">
+        delete from ai_agent_project where agent_id = #{agentId}
+    </delete>
+
+    <select id="listProjectIds" resultType="java.lang.Long">
+        select project_id
+        from ai_agent_project
+        where agent_id = #{agentId}
+        order by created_at asc
+    </select>
+
+    <select id="listRefsByUser" resultType="zzz.service.forum.domain.dto.AiAgentProjectRef">
+        select ap.agent_id as agentId, ap.project_id as projectId
+        from ai_agent_project ap
+        join "AiAgent" a on a."Id" = ap.agent_id
+        where a."UserId" = #{userId}
+        order by ap.created_at asc
+    </select>
+</mapper>

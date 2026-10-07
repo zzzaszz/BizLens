@@ -5,7 +5,6 @@
     <resultMap type="zzz.service.forum.domain.AiAgentEntity" id="AiAgentMap">
         <result property="id" column="Id" jdbcType="BIGINT"/>
         <result property="userid" column="UserId" jdbcType="BIGINT"/>
-        <result property="projectid" column="ProjectId" jdbcType="BIGINT"/>
         <result property="name" column="Name" jdbcType="VARCHAR"/>
         <result property="code" column="Code" jdbcType="VARCHAR"/>
         <result property="model" column="Model" jdbcType="VARCHAR"/>
@@ -23,7 +22,7 @@
     </resultMap>
 
     <sql id="columns">
-        "Id", "UserId", "ProjectId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
+        "Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled", "IsSystem",
         "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt"
     </sql>
 
@@ -33,11 +32,15 @@
         where "Id" = #{id}
     </select>
 
+    <!-- 项目下的角色：走 ai_agent_project 关联表（多对多） -->
     <select id="listByProjectId" resultMap="AiAgentMap">
-        select <include refid="columns"/>
-        from "AiAgent"
-        where "ProjectId" = #{projectId}
-        order by "CreatedAt" asc
+        select a."Id", a."UserId", a."Name", a."Code", a."Model", a."SystemPrompt", a."Temperature",
+               a."MaxTokens", a."Enabled", a."IsSystem", a."Avatar", a."Provider", a."ApiBaseUrl",
+               a."ApiKeyEnc", a."CreatedAt", a."UpdatedAt"
+        from "AiAgent" a
+        join ai_agent_project ap on ap.agent_id = a."Id"
+        where ap.project_id = #{projectId}
+        order by a."CreatedAt" asc
     </select>
 
     <select id="listForUser" resultMap="AiAgentMap">
@@ -49,9 +52,9 @@
     </select>
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiAgentEntity">
-        insert into "AiAgent"("Id", "UserId", "ProjectId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled",
+        insert into "AiAgent"("Id", "UserId", "Name", "Code", "Model", "SystemPrompt", "Temperature", "MaxTokens", "Enabled",
                             "IsSystem", "Avatar", "Provider", "ApiBaseUrl", "ApiKeyEnc", "CreatedAt", "UpdatedAt")
-        values (#{id}, #{userid}, #{projectid}, #{name}, #{code}, #{model}, #{systemprompt}, #{temperature}, #{maxtokens},
+        values (#{id}, #{userid}, #{name}, #{code}, #{model}, #{systemprompt}, #{temperature}, #{maxtokens},
                 #{enabled}, #{issystem}, #{avatar}, #{provider}, #{apibaseurl}, #{apikeyenc}, #{createdat}, #{updatedat})
     </insert>
 

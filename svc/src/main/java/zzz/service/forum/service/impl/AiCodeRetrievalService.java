@@ -35,32 +35,32 @@ public class AiCodeRetrievalService {
     /**
      * 检索与问题相关的代码切片。
      *
-     * @param projectId 限定在该代码项目内检索
-     * @param question  用户原始问题
-     * @param model     角色模型（可空）
-     * @param apiKey    角色 API Key
-     * @param baseUrl   厂商 base-url（可空）
-     * @param provider  厂商标识（可空）
+     * @param projectIds 限定在这些代码项目内检索（角色可关联多个项目，如前后端共用一个角色）
+     * @param question   用户原始问题
+     * @param model      角色模型（可空）
+     * @param apiKey     角色 API Key
+     * @param baseUrl    厂商 base-url（可空）
+     * @param provider   厂商标识（可空）
      * @return 命中片段，按相关度排序；无命中或出错时返回空列表，不阻断对话
      */
-    public List<AiCodeChunkHit> retrieve(Long projectId, String question, String model,
+    public List<AiCodeChunkHit> retrieve(List<Long> projectIds, String question, String model,
                                          String apiKey, String baseUrl, String provider) {
-        if (projectId == null || question == null || question.trim().isEmpty()) {
+        if (projectIds == null || projectIds.isEmpty() || question == null || question.trim().isEmpty()) {
             return Collections.emptyList();
         }
         try {
             List<String> keywords = queryRewriter.rewrite(question, model, apiKey, baseUrl, provider);
             if (keywords.isEmpty()) {
-                log.info("未得到可用检索词，跳过知识库召回: projectId={}", projectId);
+                log.info("未得到可用检索词，跳过知识库召回: projectIds={}", projectIds);
                 return Collections.emptyList();
             }
-            List<AiCodeChunkHit> hits = chunkMapper.searchByKeywords(projectId, keywords, MAX_HITS);
-            log.info("知识库召回完成: projectId={}, keywords={}, hits={}",
-                    projectId, keywords.size(), hits == null ? 0 : hits.size());
+            List<AiCodeChunkHit> hits = chunkMapper.searchByKeywords(projectIds, keywords, MAX_HITS);
+            log.info("知识库召回完成: projectIds={}, keywords={}, hits={}",
+                    projectIds, keywords.size(), hits == null ? 0 : hits.size());
             return hits == null ? Collections.emptyList() : hits;
         } catch (Exception e) {
             // 召回失败不该挡住建对话：退化成没有知识库的普通问答，比直接报错好
-            log.warn("知识库召回失败，本轮按无知识库处理: projectId={}, err={}", projectId, e.getMessage());
+            log.warn("知识库召回失败，本轮按无知识库处理: projectIds={}, err={}", projectIds, e.getMessage());
             return Collections.emptyList();
         }
     }

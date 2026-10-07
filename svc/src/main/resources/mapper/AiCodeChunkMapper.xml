@@ -22,11 +22,12 @@
     </resultMap>
 
     <!--
-      按项目 + 关键词召回切片。
+      按项目集合 + 关键词召回切片。
       命中权重：符号名 5 > 文件路径 2 > 源码正文 1——查询改写产出的候选标识符
       大多落在类名/方法名/path 上，源码正文匹配只作为补充信号。
       只返回带 source_snippet 的切片：没有源码就喂不了模型，返回也是噪声。
-      调用方必须保证 keywords 非空，否则下面的 foreach 会生成空条件导致 SQL 语法错误。
+      调用方必须保证 projectIds 与 keywords 都非空，否则 foreach 会生成空条件导致 SQL 语法错误。
+      一个角色可能关联多个项目（例如前后端），所以这里是 IN 而不是等值。
     -->
     <select id="searchByKeywords" resultMap="hitMap">
         SELECT d.path,
@@ -46,7 +47,8 @@
                ) AS score
         FROM ai_code_chunk c
         JOIN ai_code_document d ON d.id = c.document_id
-        WHERE d.project_id = #{projectId}
+        WHERE d.project_id IN
+              <foreach collection="projectIds" item="pid" open="(" separator="," close=")">#{pid}</foreach>
           AND c.source_snippet IS NOT NULL
           AND (
                <foreach collection="keywords" item="kw" separator="OR">

@@ -32,23 +32,31 @@ CREATE TABLE IF NOT EXISTS ai_code_project (
     git_url         VARCHAR(512) NOT NULL,
     git_branch      VARCHAR(128) NOT NULL DEFAULT 'main',
     git_commit      VARCHAR(64),
-    credential_ref  VARCHAR(256),
+    -- 私有仓库的访问凭据：令牌 AES 加密后存这里（复用 CryptoService，与角色 API Key 同一套），不存明文。
+    -- credential_user 是令牌对应的用户名：GitHub/GitLab 用 x-access-token / oauth2，Gitee 需填账号名。
+    credential_enc  VARCHAR(512),
+    credential_user VARCHAR(128),
     status          VARCHAR(32) NOT NULL DEFAULT 'PENDING',
     -- 最近一次索引失败的原因（已截断、已抹掉可能出现在 Git 输出里的 URL 凭据）；成功时清空
     last_error      TEXT,
     last_indexed_at TIMESTAMP,
+    -- 最近一次成功索引的耗时（毫秒），用于页面上估算"还要多久"
+    last_index_ms   BIGINT,
     created_by      BIGINT REFERENCES "User" (id) ON DELETE SET NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_code_project_status ON ai_code_project (status, updated_at DESC);
 
--- AI 角色：由代码项目创建，**一个项目可以配置多个角色**，删除项目级联删除角色。
+-- AI 角色：由代码项目创建。角色与项目是**多对多**（见 ai_agent_project）：
+-- 一个角色可以覆盖多个项目（例如前后端共用一个角色），一个项目也可以建多个角色。
+-- "ProjectId" 是早期的一对一列，已废弃不再读写（保留以便回滚，放开 NOT NULL），
+-- 新部署可直接删掉这一列。
 -- IsSystem 为历史字段（原「系统预置角色」），当前角色均由项目创建，恒为 0。
 CREATE TABLE IF NOT EXISTS "AiAgent" (
     "Id"           BIGINT PRIMARY KEY,
     "UserId"       BIGINT,
-    "ProjectId"    BIGINT NOT NULL,
+    "ProjectId"    BIGINT,
     "Name"         VARCHAR(64) NOT NULL,
     "Code"         VARCHAR(32),
     "Model"        VARCHAR(64),
@@ -63,13 +71,21 @@ CREATE TABLE IF NOT EXISTS "AiAgent" (
     "ApiKeyEnc"    VARCHAR(512),
     "CreatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE SET NULL,
-    CONSTRAINT fk_ai_agent_project FOREIGN KEY ("ProjectId") REFERENCES ai_code_project (id) ON DELETE CASCADE
+    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_agent_user ON "AiAgent" ("UserId", "Enabled");
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_code_user ON "AiAgent" ("UserId", "Code") WHERE "Code" IS NOT NULL;
--- 旧库可能残留唯一约束，见 migration-20261007-multiagent.sql；这里只保留按项目查询的普通索引
-CREATE INDEX IF NOT EXISTS idx_ai_agent_project ON "AiAgent" ("ProjectId");
+
+-- 角色 ↔ 项目 关联表（多对多）
+CREATE TABLE IF NOT EXISTS ai_agent_project (
+    agent_id   BIGINT    NOT NULL,
+    project_id BIGINT    NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_ai_agent_project PRIMARY KEY (agent_id, project_id),
+    CONSTRAINT fk_aap_agent   FOREIGN KEY (agent_id)   REFERENCES "AiAgent" ("Id")    ON DELETE CASCADE,
+    CONSTRAINT fk_aap_project FOREIGN KEY (project_id) REFERENCES ai_code_project (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_aap_project ON ai_agent_project (project_id);
 
 CREATE TABLE IF NOT EXISTS "AiConversation" (
     "Id"             BIGINT PRIMARY KEY,

@@ -11,6 +11,7 @@ import zzz.service.forum.service.AiCodeProjectService;
 
 import javax.annotation.Resource;
 import java.util.List;
+import java.util.Map;
 
 /** 代码项目元数据管理；索引执行由后续异步任务负责。 */
 @RestController
@@ -26,7 +27,25 @@ public class AiCodeProjectController {
     public R<List<AiCodeProjectEntity>> list() {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
-        return R.ok(projectService.listByUser(userId));
+        List<AiCodeProjectEntity> projects = projectService.listByUser(userId);
+        for (AiCodeProjectEntity project : projects) {
+            maskCredential(project);
+        }
+        return R.ok(projects);
+    }
+
+    /**
+     * 脱敏访问令牌，只留尾号。
+     * <p>
+     * 实体里带的是 AES 密文，原样返回等于把库里的凭据材料交给前端；
+     * 前端只需要知道"配没配"，所以统一脱敏，与角色 API Key 的处理保持一致。
+     */
+    private void maskCredential(AiCodeProjectEntity project) {
+        if (project == null || project.getCredentialEnc() == null || project.getCredentialEnc().isEmpty()) {
+            return;
+        }
+        String enc = project.getCredentialEnc();
+        project.setCredentialEnc(enc.length() > 4 ? "****" + enc.substring(enc.length() - 4) : "****");
     }
 
     @PostMapping("/create")
@@ -34,7 +53,9 @@ public class AiCodeProjectController {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
         try {
-            return R.ok(projectService.create(userId, request));
+            AiCodeProjectEntity created = projectService.create(userId, request);
+            maskCredential(created);
+            return R.ok(created);
         } catch (Exception e) {
             logger.warn("create code project error", e);
             return R.fail(e.getMessage());
@@ -46,7 +67,9 @@ public class AiCodeProjectController {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
         try {
-            return R.ok(projectService.update(userId, request));
+            AiCodeProjectEntity updated = projectService.update(userId, request);
+            maskCredential(updated);
+            return R.ok(updated);
         } catch (Exception e) {
             logger.warn("update code project error", e);
             return R.fail(e.getMessage());
@@ -61,6 +84,19 @@ public class AiCodeProjectController {
             return R.ok(projectService.queueIndex(userId, id), "索引任务已排队");
         } catch (Exception e) {
             logger.warn("queue code project index error", e);
+            return R.fail(e.getMessage());
+        }
+    }
+
+    /** 一键把当前用户的全部项目重新排队索引；正在索引的会跳过 */
+    @PostMapping("/indexAll")
+    public R<Map<String, Object>> queueIndexAll() {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(projectService.queueIndexAll(userId));
+        } catch (Exception e) {
+            logger.warn("queue all code projects index error", e);
             return R.fail(e.getMessage());
         }
     }

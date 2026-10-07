@@ -13,5 +13,8 @@ public class AiCodeProjectRequest implements Serializable {
     private String name;
     private String gitUrl;
     private String gitBranch;
-    private String credentialRef;
+    /** 私有仓库访问令牌（明文，仅入参；落库前加密）。编辑时留空表示不修改 */
+    private String credentialToken;
+    /** 令牌对应的用户名：GitHub 用 x-access-token、GitLab 用 oauth2，Gitee 需填账号名；留空按平台取默认 */
+    private String credentialUser;
 }
