@@ -14,8 +14,8 @@ public interface AiAgentService {
 
     AiAgentEntity getById(Long id);
 
-    /** 项目绑定的角色（一个项目最多一个） */
-    AiAgentEntity getByProjectId(Long projectId);
+    /** 项目下的全部角色（一个项目可以配置多个角色） */
+    List<AiAgentEntity> listByProjectId(Long projectId);
 
     /** 当前用户创建的角色 */
     List<AiAgentEntity> listForUser(Long userId);

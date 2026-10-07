@@ -4,11 +4,13 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import zzz.service.forum.context.UserContext;
 import zzz.service.forum.domain.dto.R;
 import zzz.service.forum.service.RedisService;
@@ -16,7 +18,7 @@ import zzz.service.forum.utils.JwtUtils;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -83,7 +85,7 @@ public class AuthAspect {
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || authHeader.isEmpty()) {
             log.debug("缺少 Authorization 头，path={}", path);
-            return R.fail(401, "登录到期");
+            return unauthorized(joinPoint);
         }
 
         String token = authHeader;
@@ -95,7 +97,7 @@ public class AuthAspect {
             // 必须是 access token
             if (!JwtUtils.isAccessToken(token)) {
                 log.debug("非 access token，path={}", path);
-                return R.fail(401, "登录到期");
+                return unauthorized(joinPoint);
             }
 
             Long userId = JwtUtils.parseToken(token).get("userId", Long.class);
@@ -105,14 +107,14 @@ public class AuthAspect {
             String storedToken = redisService.getCacheObject(redisKey);
             if (storedToken == null || !storedToken.equals(token)) {
                 log.debug("Token 已过期或不存在，userId={}, path={}", userId, path);
-                return R.fail(401, "登录到期");
+                return unauthorized(joinPoint);
             }
 
             // 设置用户上下文
             UserContext.setUserId(userId);
         } catch (Exception e) {
             log.debug("Token 校验异常，path={}, msg={}", path, e.getMessage());
-            return R.fail(401, "登录到期");
+            return unauthorized(joinPoint);
         }
 
         // Token 有效，继续执行
@@ -121,5 +123,33 @@ public class AuthAspect {
         } finally {
             UserContext.clear();
         }
+    }
+
+    /**
+     * 未通过校验时的返回值。
+     * <p>
+     * 普通接口返回 R 即可；但返回类型声明为 {@link SseEmitter} 的接口（对话流）不行——
+     * Spring 按方法声明类型选返回值处理器，把 R 交给 SSE 处理器会直接类型不匹配，
+     * 对外表现为空 body 的 HTTP 500，前端只能显示一句"请求失败"。
+     * 这类接口改用同样带回 error 事件的 SseEmitter。
+     */
+    private Object unauthorized(ProceedingJoinPoint joinPoint) {
+        if (!isSseMethod(joinPoint)) {
+            return R.fail(401, "登录到期");
+        }
+        SseEmitter emitter = new SseEmitter(0L);
+        try {
+            emitter.send(SseEmitter.event().name("error").data("登录已过期，请重新登录"));
+            emitter.complete();
+        } catch (Exception ignored) {
+            // 推不出去也只能这样了，客户端会按流结束处理
+        }
+        return emitter;
+    }
+
+    private boolean isSseMethod(ProceedingJoinPoint joinPoint) {
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        Method method = signature.getMethod();
+        return SseEmitter.class.isAssignableFrom(method.getReturnType());
     }
 }

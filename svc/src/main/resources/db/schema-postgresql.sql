@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS ai_code_project (
 );
 CREATE INDEX IF NOT EXISTS idx_code_project_status ON ai_code_project (status, updated_at DESC);
 
--- AI 角色：由代码项目创建，一个项目最多一个角色（ProjectId 唯一），删除项目级联删除角色。
+-- AI 角色：由代码项目创建，**一个项目可以配置多个角色**，删除项目级联删除角色。
 -- IsSystem 为历史字段（原「系统预置角色」），当前角色均由项目创建，恒为 0。
 CREATE TABLE IF NOT EXISTS "AiAgent" (
     "Id"           BIGINT PRIMARY KEY,
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS "AiAgent" (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_agent_user ON "AiAgent" ("UserId", "Enabled");
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_code_user ON "AiAgent" ("UserId", "Code") WHERE "Code" IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_project ON "AiAgent" ("ProjectId");
+-- 旧库可能残留唯一约束，见 migration-20261007-multiagent.sql；这里只保留按项目查询的普通索引
+CREATE INDEX IF NOT EXISTS idx_ai_agent_project ON "AiAgent" ("ProjectId");
 
 CREATE TABLE IF NOT EXISTS "AiConversation" (
     "Id"             BIGINT PRIMARY KEY,

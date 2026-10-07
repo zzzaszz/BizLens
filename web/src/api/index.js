@@ -38,12 +38,27 @@ export function aiCloseConversation(data) {
   return request({url: '/ai/chat/close', method: 'post', data})
 }
 
+/** 重新打开已关闭的会话，继续对话 */
+export function aiReopenConversation(data) {
+  return request({url: '/ai/chat/reopen', method: 'post', data})
+}
+
 export function aiSend(data) {
   return request({url: '/ai/chat/send', method: 'post', data})
 }
 
 export function aiHistory(conversationId) {
   return request({url: '/ai/chat/history', method: 'get', params: {conversationId}})
+}
+
+/** 删除单条消息（对话页右键删除） */
+export function aiDeleteMessage(id) {
+  return request({url: `/ai/chat/message/${id}`, method: 'delete'})
+}
+
+/** 删除整个会话及其全部消息（对话页右键删除） */
+export function aiDeleteConversation(id) {
+  return request({url: `/ai/chat/conversation/${id}`, method: 'delete'})
 }
 
 // ============ AI 角色 ==========

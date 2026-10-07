@@ -24,6 +24,12 @@ public interface AiService {
     boolean closeConversation(Long userId, Long conversationId);
 
     /**
+     * 重新打开已关闭的会话，使其可继续对话。
+     * 打开历史会话时用：历史随时可看，但要接着聊必须先"续上"。
+     */
+    boolean reopenConversation(Long userId, Long conversationId);
+
+    /**
      * 发送消息并获取 AI 回复。
      *
      * @return { conversationId, reply, history }
@@ -37,4 +43,17 @@ public interface AiService {
 
     /** 会话历史消息 */
     List<AiChatMessageEntity> history(Long userId, Long conversationId);
+
+    /**
+     * 删除单条消息（校验该消息所属会话归当前用户）。
+     *
+     * @return 是否删除成功
+     */
+    boolean deleteMessage(Long userId, Long messageId);
+
+    /**
+     * 删除整个会话及其全部消息（校验归属）。
+     * 与「关闭会话」不同：关闭只是归档，删除不可恢复。
+     */
+    boolean deleteConversation(Long userId, Long conversationId);
 }

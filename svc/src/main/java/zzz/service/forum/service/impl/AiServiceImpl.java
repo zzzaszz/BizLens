@@ -71,6 +71,13 @@ public class AiServiceImpl implements AiService {
             "本轮没有从项目「%s」的代码库中检索到相关片段。请如实告知用户当前无法基于该项目回答，"
             + "并建议他把问题描述得更具体（例如提到具体的业务名称、单据、字段或操作），不要编造业务规则。";
 
+    /** 流式增量事件：每段增量各自推一条，前端逐段追加，形成打字机效果 */
+    private static final String EVENT_DELTA = "delta";
+    /** 流正常结束。带空 data——全文已由 delta 推完，这里再带一次全文会让前端重复追加 */
+    private static final String EVENT_DONE = "done";
+    /** 安全拦截：要求前端把已显示的内容整段替换掉（增量已经出去了，收不回来，只能纠正） */
+    private static final String EVENT_RESET = "reset";
+
     @Resource
     private AiConversationService aiConversationService;
     @Resource
@@ -105,6 +112,8 @@ public class AiServiceImpl implements AiService {
         if (!userId.equals(agent.getUserid())) {
             throw new BaseBusinessException("无权使用他人创建的角色");
         }
+        // 建会话时就校验角色可用（Key + 项目索引状态），避免"能建会话、一发消息才报错"
+        ensureChatReady(agent, buildAiRequest(agent, new ArrayList<>()));
         return aiConversationService.create(userId, agentId, title);
     }
 
@@ -115,7 +124,24 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public boolean closeConversation(Long userId, Long conversationId) {
+        AiConversationEntity conv = aiConversationService.getById(conversationId);
+        // 原来直接返回 service 的 false：会话不存在或不是自己的，前端收到的是"没报错的成功"
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            throw new BaseBusinessException("会话不存在或无权访问");
+        }
         return aiConversationService.close(conversationId, userId);
+    }
+
+    @Override
+    public boolean reopenConversation(Long userId, Long conversationId) {
+        AiConversationEntity conv = aiConversationService.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            throw new BaseBusinessException("会话不存在或无权访问");
+        }
+        // 续聊要能真正聊起来：角色还在、Key 还在、项目还是 READY，否则"打开了"也发不出消息
+        AiAgentEntity agent = requireAgent(conv);
+        ensureChatReady(agent, buildAiRequest(agent, new ArrayList<>()));
+        return aiConversationService.reopen(conversationId, userId);
     }
 
     @Override
@@ -169,12 +195,34 @@ public class AiServiceImpl implements AiService {
             // 3. 组装 messages = 角色设定 + 知识库召回 + 热上下文 + 当前问题
             aiRequest.setMessages(buildMessages(conv, agent, project, aiRequest, request.getMessage()));
 
-            // 4. 流式调用，边推送边累积，完成后落库
+            // 4. 流式调用：增量即时推送，累积的同时做安全拦截，完成后落库
             StringBuilder reply = new StringBuilder();
             aiProvider.chatStream(aiRequest, new AiStreamListener() {
+                /** 命中安全拦截后置位，后续增量一律丢弃，不再推给客户端 */
+                private boolean blocked = false;
+
                 @Override
                 public void onToken(String delta) {
+                    if (blocked) {
+                        return;
+                    }
                     reply.append(delta);
+                    // 先判后发：命中的这一段留在服务端，不推出去。
+                    // 打字机效果意味着内容已经开始外送，安全拦截只能"尽早断"而不是"事前拦"，
+                    // 所以这里用增量后的全文做判断，尽量把命中的那段挡在推送之前。
+                    if (aiSafetyGuard.containsRestrictedOutput(reply.toString())) {
+                        blocked = true;
+                        try {
+                            emitter.send(sseEvent(EVENT_RESET, aiSafetyGuard.refusal()));
+                        } catch (Exception ignored) {
+                        }
+                        return;
+                    }
+                    try {
+                        emitter.send(sseEvent(EVENT_DELTA, delta));
+                    } catch (Exception ignored) {
+                        // 客户端断开等：继续把内容读完并落库，避免历史记录缺失
+                    }
                 }
 
                 @Override
@@ -191,10 +239,11 @@ public class AiServiceImpl implements AiService {
                 public void onDone() {
                     try {
                         aiChatMessageService.saveAndCache(request.getConversationId(), "USER", String.valueOf(userId), request.getMessage());
-                        String safeReply = aiSafetyGuard.containsRestrictedOutput(reply.toString())
-                                ? aiSafetyGuard.refusal() : reply.toString();
+                        // 落库用拒答文案而非模型原文：历史回看时也不该看到被拦截的内容
+                        String safeReply = blocked ? aiSafetyGuard.refusal() : reply.toString();
                         aiChatMessageService.saveAndCache(request.getConversationId(), "AI", "ai", safeReply);
-                        emitter.send(sseEvent("done", safeReply));
+                        // done 不再携带正文，正文已经由 delta 推完
+                        emitter.send(sseEvent(EVENT_DONE, null));
                         emitter.complete();
                     } catch (Exception e) {
                         log.warn("流式完成落库失败: {}", e.getMessage());
@@ -242,6 +291,34 @@ public class AiServiceImpl implements AiService {
         return aiChatMessageService.listByConversation(conversationId);
     }
 
+    @Override
+    public boolean deleteMessage(Long userId, Long messageId) {
+        AiChatMessageEntity message = aiChatMessageService.getById(messageId);
+        if (message == null) {
+            throw new BaseBusinessException("消息不存在或已删除");
+        }
+        // 消息本身不存用户，归属要通过它所属的会话判断
+        AiConversationEntity conv = aiConversationService.getById(message.getConversationid());
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            throw new BaseBusinessException("无权删除该消息");
+        }
+        return aiChatMessageService.delete(messageId) != null;
+    }
+
+    @Override
+    public boolean deleteConversation(Long userId, Long conversationId) {
+        AiConversationEntity conv = aiConversationService.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            throw new BaseBusinessException("会话不存在或无权访问");
+        }
+        if (!aiConversationService.delete(conversationId, userId)) {
+            throw new BaseBusinessException("会话删除失败");
+        }
+        // 消息行由外键级联删除，但 Redis 热上下文不会跟着走，得手工清
+        aiChatMessageService.clearCache(conversationId);
+        return true;
+    }
+
     // ==================== 私有方法 ====================
 
     /** 校验会话归属 + 用户限流 + 消息截断 */
@@ -266,6 +343,10 @@ public class AiServiceImpl implements AiService {
         AiConversationEntity conv = aiConversationService.getById(request.getConversationId());
         if (conv == null || !conv.getUserid().equals(userId)) {
             throw new BaseBusinessException("会话不存在或无权访问");
+        }
+        // 会话列表只查 Status=1，已关闭的会话不能再发消息，否则"关闭"只等于从列表消失
+        if (conv.getStatus() == null || conv.getStatus() != 1) {
+            throw new BaseBusinessException("会话已关闭，请新建会话");
         }
         return conv;
     }

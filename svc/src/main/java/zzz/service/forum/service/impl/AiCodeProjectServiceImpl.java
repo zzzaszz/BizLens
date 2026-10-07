@@ -16,6 +16,13 @@ import java.util.List;
 @Service("aiCodeProjectService")
 public class AiCodeProjectServiceImpl implements AiCodeProjectService {
 
+    /**
+     * 判定"索引任务还活着"的时间窗（分钟）。
+     * 超过这个时长状态仍停在 QUEUED/INDEXING，就认为上一轮任务已随进程异常退出，
+     * 允许重新排队——否则状态会永久卡住且没有任何出口。
+     */
+    private static final int STUCK_MINUTES = 10;
+
     @Resource
     private AiCodeProjectMapper projectMapper;
     @Resource
@@ -75,10 +82,34 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
 
     @Override
     public AiCodeProjectEntity queueIndex(Long userId, Long projectId) {
-        requireOwner(userId, projectId);
+        AiCodeProjectEntity project = requireOwner(userId, projectId);
+        // 一个项目同时跑两个索引任务会互相覆盖切片数据（都先按项目删除再写入），必须挡住
+        if (isIndexRunning(project)) {
+            throw new BaseBusinessException("该项目正在索引，请等本次索引结束后再重试");
+        }
         projectMapper.updateStatus(projectId, "QUEUED");
         indexService.indexAsync(projectId);
         return projectMapper.getById(projectId);
+    }
+
+    /**
+     * 是否已有索引任务在跑。
+     * <p>
+     * 只看状态不够：进程在 INDEXING 期间被强杀时状态不会回写，会永久停在 INDEXING。
+     * 所以再加一道时间窗，状态新近被改动才认为任务还活着；否则视为已死，放行重排。
+     */
+    private boolean isIndexRunning(AiCodeProjectEntity project) {
+        String status = project.getStatus();
+        if (!"QUEUED".equals(status) && !"INDEXING".equals(status)) {
+            return false;
+        }
+        Date updatedAt = project.getUpdatedAt();
+        if (updatedAt == null) {
+            return false;
+        }
+        long elapsedMinutes = (System.currentTimeMillis() - updatedAt.getTime()) / 60000L;
+        // 时钟回拨导致 elapsed 为负时按"还在跑"处理，宁可让用户多等也不要并发跑两个任务
+        return elapsedMinutes < STUCK_MINUTES;
     }
 
     @Override

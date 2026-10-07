@@ -36,13 +36,23 @@ public class AiAgentController {
         List<AiAgentEntity> agents = aiAgentService.listForUser(userId);
         if (agents == null) agents = new ArrayList<>();
         for (AiAgentEntity agent : agents) {
-            // 脱敏：Key 仅显示尾号（TODO Phase C 完善）
-            if (agent.getApikeyenc() != null && !agent.getApikeyenc().isEmpty()) {
-                String k = agent.getApikeyenc();
-                agent.setApikeyenc(k.length() > 4 ? "****" + k.substring(k.length() - 4) : "****");
-            }
+            maskApiKey(agent);
         }
         return R.ok(agents);
+    }
+
+    /**
+     * 脱敏 API Key，只留尾号。
+     * <p>
+     * 列表、创建、编辑的响应都要过这一道：实体里带的是 AES 密文，
+     * 原样返回等于把库里的密钥材料交给前端，密文本身也不该出网。
+     */
+    private void maskApiKey(AiAgentEntity agent) {
+        if (agent == null || agent.getApikeyenc() == null || agent.getApikeyenc().isEmpty()) {
+            return;
+        }
+        String key = agent.getApikeyenc();
+        agent.setApikeyenc(key.length() > 4 ? "****" + key.substring(key.length() - 4) : "****");
     }
 
     /**
@@ -63,7 +73,9 @@ public class AiAgentController {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
         try {
-            return R.ok(aiAgentService.create(userId, request));
+            AiAgentEntity created = aiAgentService.create(userId, request);
+            maskApiKey(created);
+            return R.ok(created);
         } catch (Exception e) {
             logger.warn("create agent error", e);
             return R.fail(e.getMessage());
@@ -76,7 +88,9 @@ public class AiAgentController {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
         try {
-            return R.ok(aiAgentService.update(userId, request));
+            AiAgentEntity updated = aiAgentService.update(userId, request);
+            maskApiKey(updated);
+            return R.ok(updated);
         } catch (Exception e) {
             logger.warn("update agent error", e);
             return R.fail(e.getMessage());

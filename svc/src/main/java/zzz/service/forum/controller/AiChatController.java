@@ -12,6 +12,7 @@ import zzz.service.forum.domain.dto.AiCreateConversationRequest;
 import zzz.service.forum.domain.dto.AiSendRequest;
 import zzz.service.forum.domain.dto.R;
 import zzz.service.forum.service.AiService;
+import zzz.service.forum.utils.BaseBusinessException;
 
 import javax.annotation.Resource;
 import java.util.List;
@@ -56,9 +57,41 @@ public class AiChatController {
     public R<Boolean> close(@RequestBody Map<String, Object> body) {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
-        Object id = body.get("conversationId");
-        if (id == null) return R.fail("会话ID不能为空");
-        return R.ok(aiService.closeConversation(userId, Long.valueOf(String.valueOf(id))));
+        try {
+            return R.ok(aiService.closeConversation(userId, parseConversationId(body.get("conversationId"))));
+        } catch (Exception e) {
+            logger.warn("close conversation error", e);
+            return R.fail(e.getMessage());
+        }
+    }
+
+    /**
+     * 解析请求体里的会话ID。
+     * 直接 `Long.valueOf` 会把 `For input string: "abc"` 这种 Java 异常信息回给用户，
+     * 既看不懂也不该外泄，这里统一换成可读提示。
+     */
+    private Long parseConversationId(Object raw) {
+        if (raw == null) {
+            throw new BaseBusinessException("会话ID不能为空");
+        }
+        try {
+            return Long.valueOf(String.valueOf(raw).trim());
+        } catch (NumberFormatException e) {
+            throw new BaseBusinessException("会话ID格式不正确");
+        }
+    }
+
+    /** 重新打开已关闭的会话，继续对话 */
+    @PostMapping("/reopen")
+    public R<Boolean> reopen(@RequestBody Map<String, Object> body) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(aiService.reopenConversation(userId, parseConversationId(body.get("conversationId"))));
+        } catch (Exception e) {
+            logger.warn("reopen conversation error", e);
+            return R.fail(e.getMessage());
+        }
     }
 
     /** 发送消息（一次性返回） */
@@ -80,11 +113,43 @@ public class AiChatController {
         Long userId = UserContext.getUserId();
         SseEmitter emitter = new SseEmitter(0L); // 不设超时
         if (userId == null) {
-            emitter.completeWithError(new IllegalStateException("请先登录"));
+            // 用 SSE error 事件回话，不要 completeWithError：后者会把响应变成 HTTP 500，
+            // 前端只拿到"发送失败：HTTP 500"，既不知道是登录失效，也没法据此跳登录页
+            try {
+                emitter.send(SseEmitter.event().name("error").data("登录已过期，请重新登录"));
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
             return emitter;
         }
         aiService.chatStream(userId, request, emitter);
         return emitter;
+    }
+
+    /** 删除整个会话及其全部消息（业务问答页右键删除） */
+    @DeleteMapping("/conversation/{id}")
+    public R<Boolean> deleteConversation(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(aiService.deleteConversation(userId, id));
+        } catch (Exception e) {
+            logger.warn("delete conversation error", e);
+            return R.fail(e.getMessage());
+        }
+    }
+
+    /** 删除单条消息（业务问答页右键删除） */
+    @DeleteMapping("/message/{id}")
+    public R<Boolean> deleteMessage(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(aiService.deleteMessage(userId, id));
+        } catch (Exception e) {
+            logger.warn("delete message error", e);
+            return R.fail(e.getMessage());
+        }
     }
 
     /** 会话历史消息 */

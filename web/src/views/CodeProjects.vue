@@ -1,9 +1,9 @@
 <template>
-  <section class="projects-page">
-    <div class="page-heading">
+  <div class="projects-page">
+    <div class="page-head">
       <div>
-        <h1>代码项目</h1>
-        <p class="subtitle">登记 Git 项目元数据；项目完成索引后，可为它创建一个 AI 角色</p>
+        <h2>代码项目</h2>
+        <p>登记 Git 项目元数据；项目完成索引后，可为它创建多个 AI 角色</p>
       </div>
       <el-button type="primary" :icon="Plus" @click="openCreate">新增项目</el-button>
     </div>
@@ -17,12 +17,21 @@
           {{ row.documentCount || 0 }} 文件 / {{ row.chunkCount || 0 }} 切片 / {{ row.symbolChunkCount || 0 }} 符号
         </template>
       </el-table-column>
-      <!-- 只反映凭据字段本身有没有填，不据此推断仓库是公开还是私有：
-           私有仓库没填凭据同样显示"未配置"，那才是最需要提示的情况 -->
-      <el-table-column label="访问凭据" width="110">
+      <!-- 这一列只反映"字段里填没填"：不要据此推断仓库是公开还是私有，
+           也不要说"没填就没凭据"——clone 的凭据来源既不是这个字段，也不是机器，而是暂时没有 -->
+      <el-table-column label="Git 凭据" width="130">
         <template #default="{ row }">
-          <el-tag v-if="row.credentialRef" type="success" effect="plain" size="small">已配置</el-tag>
-          <el-tag v-else type="warning" effect="plain" size="small">未配置</el-tag>
+          <el-tooltip placement="top" :show-after="100">
+            <template #content>
+              <div class="err-tip">
+                该字段不参与克隆。为免借用服务账号身份读取私有代码，克隆已<b>停用运行机器的 Git 凭据</b>
+                （全局配置、~/.git-credentials、SSH key 一律不继承），而按项目的凭据注入尚未实现，
+                因此当前只能索引可匿名访问的仓库。
+              </div>
+            </template>
+            <el-tag v-if="row.credentialRef" type="info" effect="plain" size="small">已填写（未生效）</el-tag>
+            <el-tag v-else type="info" effect="plain" size="small">未填写</el-tag>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="240">
@@ -37,23 +46,36 @@
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="AI 角色" width="120">
+      <!-- 一个项目可以有多个角色，这里把它们都列出来 -->
+      <el-table-column label="AI 角色" min-width="170">
         <template #default="{ row }">
-          <span v-if="agentOf(row.id)" class="agent-bound">{{ agentOf(row.id).name }}</span>
+          <template v-if="agentsOf(row.id).length">
+            <el-tag v-for="a in agentsOf(row.id)" :key="a.id" size="small" effect="plain" class="agent-tag">
+              {{ a.name }}
+            </el-tag>
+          </template>
           <span v-else class="agent-none">未创建</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="230" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
-          <el-button link :loading="indexingId === row.id" @click="queueIndex(row)">排队索引</el-button>
-          <el-button v-if="!agentOf(row.id)" link type="primary" @click="createAgent(row)">创建角色</el-button>
+          <!-- 索引进行中禁止再点（loading 只覆盖请求过程，排完队按钮就恢复可点，容易连点）。
+               但判定要带时间窗：进程被杀会让状态永远停在 INDEXING，那时必须放行重排 -->
+          <el-button link :loading="indexingId === row.id"
+            :disabled="isIndexRunning(row)"
+            @click="queueIndex(row)">{{ indexActionText(row) }}</el-button>
+          <el-tooltip v-if="row.status !== 'READY'"
+            placement="top" content="项目完成索引后才能创建角色">
+            <span class="btn-disabled-wrap"><el-button link type="primary" disabled>创建角色</el-button></span>
+          </el-tooltip>
+          <el-button v-else link type="primary" @click="createAgent(row)">创建角色</el-button>
           <el-button link @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="removeProject(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="form.id ? '编辑项目' : '新增项目'" width="520px">
+    <el-dialog v-model="visible" :title="form.id ? '编辑项目' : '新增项目'" width="520px" align-center>
       <el-form :model="form" label-width="90px">
         <el-form-item label="项目名称" required>
           <el-input v-model="form.name" maxlength="128" />
@@ -65,16 +87,22 @@
           <el-input v-model="form.gitBranch" placeholder="main" />
         </el-form-item>
         <el-form-item label="Git 凭据">
-          <el-input v-model="form.credentialRef" placeholder="公开仓库可留空；私有仓库填凭据引用，不要填明文密码" />
+          <el-input v-model="form.credentialRef" placeholder="暂不参与克隆，可留空" />
         </el-form-item>
       </el-form>
-      <p class="form-tip">公开仓库不需要凭据；私有仓库需填写。索引状态为「已就绪」的项目才能用来创建角色并发起对话。</p>
+      <p class="form-tip">
+        <strong>此字段不参与克隆</strong>。索引时的 <code>git clone</code> 已停用运行机器的 Git 凭据
+        （全局配置、<code>~/.git-credentials</code>、SSH key 一律不继承）——
+        否则任何人都能借服务账号的身份读私有代码。按项目的凭据注入尚未实现，
+        因此<strong>当前只能索引可匿名访问的仓库</strong>。
+        索引状态为「已就绪」的项目才能用来创建角色并发起对话。
+      </p>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveProject">保存</el-button>
       </template>
     </el-dialog>
-  </section>
+  </div>
 </template>
 
 <script setup>
@@ -100,9 +128,27 @@ function emptyForm() { return { id: null, name: '', gitUrl: '', gitBranch: 'main
 function statusText(status) { return ({ PENDING: '待索引', QUEUED: '排队中', INDEXING: '索引中', READY: '已就绪', FAILED: '失败' })[status] || status || '未知' }
 function statusType(status) { return ({ READY: 'success', FAILED: 'danger', INDEXING: 'warning', QUEUED: 'warning' })[status] || 'info' }
 
-/** 项目已创建的角色（一个项目最多一个） */
-function agentOf(projectId) {
-  return agents.value.find(a => a.projectid === projectId) || null
+/** 索引任务视为"还活着"的时间窗（分钟），与后端 AiCodeProjectServiceImpl.STUCK_MINUTES 保持一致 */
+const STUCK_MINUTES = 10
+
+/** 是否已有索引任务在跑：状态 + 时间窗双重判定，光是 INDEXING 可能只是上次进程被杀留下的残留状态 */
+function isIndexRunning(row) {
+  if (row.status !== 'QUEUED' && row.status !== 'INDEXING') return false
+  if (!row.updatedAt) return false
+  const elapsed = (Date.now() - new Date(row.updatedAt.replace(' ', 'T')).getTime()) / 60000
+  return elapsed < STUCK_MINUTES
+}
+
+function indexActionText(row) {
+  if (row.status === 'FAILED') return '重试索引'
+  // 状态卡在排队/索引中但已超时：给一个明确的"重排"动作，否则用户没有出口
+  if ((row.status === 'QUEUED' || row.status === 'INDEXING') && !isIndexRunning(row)) return '重新索引'
+  return '排队索引'
+}
+
+/** 项目下已创建的角色（一个项目可以配置多个） */
+function agentsOf(projectId) {
+  return agents.value.filter(a => a.projectid === projectId)
 }
 
 /** 把 Git 的原始报错归成一类可操作提示；完整报错在 tooltip 里 */
@@ -110,7 +156,7 @@ function errorHint(row) {
   const err = (row.lastError || '').toLowerCase()
   if (err.includes('authentication failed') || err.includes('could not read username')
       || err.includes('terminal prompts disabled') || err.includes('403')) {
-    return '访问凭据不正确，或该私有仓库需要 Token'
+    return '私有仓库暂时无法索引：克隆不再借用运行机器的凭据，需改为可匿名访问的地址'
   }
   if (err.includes('could not resolve host') || err.includes('connection timed out')
       || err.includes('connection refused')) {
@@ -161,9 +207,9 @@ async function queueIndex(row) {
 }
 
 async function removeProject(row) {
-  const bound = agentOf(row.id)
-  const tip = bound
-    ? `确定删除项目“${row.name}”吗？该项目下的角色「${bound.name}」会一并删除。`
+  const bound = agentsOf(row.id)
+  const tip = bound.length
+    ? `确定删除项目“${row.name}”吗？该项目下的 ${bound.length} 个角色（${bound.map(a => a.name).join('、')}）会一并删除。`
     : `确定删除项目“${row.name}”吗？`
   try { await ElMessageBox.confirm(tip, '删除确认', { type: 'warning' }) } catch { return }
   try {
@@ -177,12 +223,15 @@ onMounted(loadProjects)
 </script>
 
 <style scoped>
-.projects-page { max-width: 1280px; margin: 0 auto; }
-.page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 16px; }
-h1 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; }
-.subtitle { margin: 4px 0 0; color: var(--text-secondary); font-size: 13px; }
-.agent-bound { color: var(--text-primary); }
+/* 与「AI 角色」页保持同一套布局：占满内容区、不加 max-width，
+   否则两页宽度不一致，且表格会被挤到需要横向滚动 */
+.projects-page { height: 100%; display: flex; flex-direction: column; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
+.page-head h2 { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
+.page-head p { font-size: 13px; color: var(--text-secondary); margin: 0; }
 .agent-none { color: var(--text-muted); }
+/* 多个角色时的标签间距 */
+.agent-tag { margin: 2px 4px 2px 0; }
 
 /* 索引失败原因：列表里一行省略，悬停看完整报错 */
 .err-line {
@@ -191,5 +240,8 @@ h1 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; }
 }
 .err-tip { max-width: 420px; line-height: 1.6; word-break: break-all; }
 .form-tip { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
-@media (max-width: 720px) { .page-heading { flex-direction: column; } }
+.form-tip strong { color: var(--warning-color); font-weight: 600; }
+/* 禁用的按钮不触发鼠标事件，tooltip 要挂在外层 span 上 */
+.btn-disabled-wrap { display: inline-block; }
+@media (max-width: 720px) { .page-head { flex-direction: column; } }
 </style>

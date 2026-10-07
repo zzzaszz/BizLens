@@ -33,10 +33,11 @@
         where "Id" = #{id}
     </select>
 
-    <select id="getByProjectId" resultMap="AiAgentMap">
+    <select id="listByProjectId" resultMap="AiAgentMap">
         select <include refid="columns"/>
         from "AiAgent"
         where "ProjectId" = #{projectId}
+        order by "CreatedAt" asc
     </select>
 
     <select id="listForUser" resultMap="AiAgentMap">

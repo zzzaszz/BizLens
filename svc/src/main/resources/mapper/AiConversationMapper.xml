@@ -18,11 +18,12 @@
         where "Id" = #{id}
     </select>
 
+    <!-- 不按 Status 过滤：已关闭的会话也是历史，前端要能翻出来回看并重新续聊。
+         只查 Status=1 的话，"关闭"实际等于不可恢复地丢失入口。 -->
     <select id="listByUser" resultMap="AiConversationMap">
         select "Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt"
         from "AiConversation"
         where "UserId" = #{userId}
-          and "Status" = 1
         order by "UpdatedAt" desc
     </select>
 
@@ -31,10 +32,24 @@
         values (#{id}, #{userid}, #{agentid}, #{title}, #{status}, #{createdat}, #{updatedat})
     </insert>
 
+    <!-- 时间统一由应用传入，不用 CURRENT_TIMESTAMP：插入时用的是 JVM 时间，
+         两套时钟混用会出现 updatedAt 早于 createdAt（本机实测差约 13 秒），
+         而会话列表正是按 UpdatedAt 倒序 -->
+    <!-- 会话下的消息由 fk_ai_message_conversation ON DELETE CASCADE 自动清理 -->
+    <delete id="deleteById">
+        delete from "AiConversation" where "Id" = #{id}
+    </delete>
+
     <update id="updateStatus">
         update "AiConversation"
         set "Status" = #{status},
-            "UpdatedAt" = CURRENT_TIMESTAMP
+            "UpdatedAt" = #{updatedAt}
+        where "Id" = #{id}
+    </update>
+
+    <update id="touch">
+        update "AiConversation"
+        set "UpdatedAt" = #{updatedAt}
         where "Id" = #{id}
     </update>
 </mapper>

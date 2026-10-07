@@ -3,6 +3,7 @@ package zzz.service.forum.service.impl;
 import org.springframework.stereotype.Service;
 import zzz.service.forum.domain.AiChatMessageEntity;
 import zzz.service.forum.mapper.AiChatMessageMapper;
+import zzz.service.forum.mapper.AiConversationMapper;
 import zzz.service.forum.service.AiChatMessageService;
 import zzz.service.forum.service.RedisService;
 import zzz.service.forum.utils.SnowflakeIdGenerator;
@@ -26,6 +27,8 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
     @Resource
     private AiChatMessageMapper aiChatMessageMapper;
     @Resource
+    private AiConversationMapper aiConversationMapper;
+    @Resource
     private SnowflakeIdGenerator snowflakeIdGenerator;
     @Resource
     private RedisService redisService;
@@ -40,12 +43,38 @@ public class AiChatMessageServiceImpl implements AiChatMessageService {
         entity.setContent(content);
         entity.setCreatetime(new Date());
         aiChatMessageMapper.insert(entity);
+        // 同步推进会话时间：列表按 UpdatedAt 倒序，界面也显示它，不回写就会出现"刚聊完的会话排在后面、时间不动"
+        aiConversationMapper.touch(conversationId, entity.getCreatetime());
         return entity;
     }
 
     @Override
     public List<AiChatMessageEntity> listByConversation(Long conversationId) {
         return aiChatMessageMapper.listByConversation(conversationId);
+    }
+
+    @Override
+    public AiChatMessageEntity getById(Long id) {
+        return id == null ? null : aiChatMessageMapper.getById(id);
+    }
+
+    @Override
+    public Long delete(Long messageId) {
+        AiChatMessageEntity message = getById(messageId);
+        if (message == null) {
+            return null;
+        }
+        aiChatMessageMapper.deleteById(messageId);
+        // 热上下文里还有这条消息，不清掉的话下一轮会把它当上下文发给模型
+        redisService.deleteObject(REDIS_HISTORY_PREFIX + message.getConversationid());
+        return message.getConversationid();
+    }
+
+    @Override
+    public void clearCache(Long conversationId) {
+        if (conversationId != null) {
+            redisService.deleteObject(REDIS_HISTORY_PREFIX + conversationId);
+        }
     }
 
     @Override

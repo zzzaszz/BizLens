@@ -36,6 +36,10 @@
   --bg-color: #F8FAFC;
   --bg-light: #F1F5F9;
   --bg-white: #ffffff;
+  /* 表格行 hover 底色：必须是实色。sticky 固定列（如「操作」列）靠自身背景遮住横向滚动过去的列，
+     用半透明色会让下面的列透出来，表现为"鼠标移上去操作列变透明"。
+     这个值是 #2563EB 6% 叠加在白底上的等效实色。 */
+  --table-row-hover-bg: #F2F6FE;
 
   /* 文字色 - 中性深板岩，替代原深蓝标题色 */
   --text-primary: #0F172A;
@@ -199,8 +203,9 @@ html, body {
   background: var(--bg-light);
 }
 
+/* 行 hover 用实色（见 --table-row-hover-bg 的说明）：固定列不能被"透视" */
 .el-table__body tr:hover > td.el-table__cell {
-  background-color: rgba(37, 99, 235, 0.06) !important;
+  background-color: var(--table-row-hover-bg) !important;
 }
 
 /* 卡片：1px 描边替代投影 */
@@ -431,15 +436,24 @@ html, body {
    焦点管理 - 无障碍访问
    ============================================= */
 
-/* 仅对可交互元素显示焦点环，排除输入框内部 input（边框由 el-input__wrapper 控制） */
-a:focus-visible,
-button:focus-visible,
-input:not(.el-input__inner):focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-[tabindex]:focus-visible,
-.el-menu-item:focus-visible,
-.el-dropdown-item:focus-visible {
+/* 焦点环只画给「本项目自己的」可交互元素。
+ *
+ * 这里必须把所有 Element Plus 组件排除掉，原因：
+ * EP 的输入类组件内部都有一个隐藏/可见的 <input>，类名各不相同
+ * （el-input__inner、el-select__input、el-textarea__inner、el-range-input……），
+ * 早先写的是 `input:not(.el-input__inner)`，只挡住了 el-input，
+ * 点击 el-select 时它内部的 input.el-select__input 就被命中，
+ * 于是在组件框外多出一圈 2px 蓝边——看着就是"输入框外面套了一层边框"。
+ * 同时 `[tabindex]:focus-visible` 也会命中 EP 组件的 wrapper（tabindex=-1/0），
+ * 所以统一用 `:not([class*="el-"])` 把 EP 相关元素一次性排除干净。
+ * 自定义可点击元素（如 .collapse-btn、.user-dropdown）在自己组件里另有 :focus-visible 规则，不受影响。
+ */
+a:not([class*="el-"]):focus-visible,
+button:not([class*="el-"]):focus-visible,
+input:not([class*="el-"]):focus-visible,
+textarea:not([class*="el-"]):focus-visible,
+select:not([class*="el-"]):focus-visible,
+[tabindex]:not([class*="el-"]):focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
@@ -447,7 +461,9 @@ select:focus-visible,
 
 /* EP 输入框内部元素由 Element Plus 管理边框，不画外层 outline */
 .el-input__inner:focus-visible,
-.el-textarea__inner:focus-visible {
+.el-select__input:focus-visible,
+.el-textarea__inner:focus-visible,
+.el-range-input:focus-visible {
   outline: none;
 }
 

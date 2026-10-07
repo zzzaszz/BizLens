@@ -27,14 +27,14 @@
           active-text-color="#ffffff"
           aria-label="站点导航"
         >
-          <el-menu-item index="/ai">
-            <el-icon><ChatDotRound /></el-icon>
-            <span>业务问答</span>
-          </el-menu-item>
-
           <el-menu-item index="/dashboard">
             <el-icon><HomeFilled /></el-icon>
             <span>工作台</span>
+          </el-menu-item>
+
+          <el-menu-item index="/ai">
+            <el-icon><ChatDotRound /></el-icon>
+            <span>业务问答</span>
           </el-menu-item>
 
           <el-menu-item index="/ai/agents">

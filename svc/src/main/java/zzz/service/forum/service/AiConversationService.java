@@ -17,4 +17,10 @@ public interface AiConversationService {
 
     /** 关闭会话（校验归属） */
     boolean close(Long conversationId, Long userId);
+
+    /** 重新打开已关闭的会话，使其可继续对话（校验归属） */
+    boolean reopen(Long conversationId, Long userId);
+
+    /** 删除会话及其全部消息（校验归属） */
+    boolean delete(Long conversationId, Long userId);
 }

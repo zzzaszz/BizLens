@@ -52,6 +52,24 @@ public class AiConversationServiceImpl implements AiConversationService {
         if (conv == null || !conv.getUserid().equals(userId)) {
             return false;
         }
-        return aiConversationMapper.updateStatus(conversationId, 0) > 0;
+        return aiConversationMapper.updateStatus(conversationId, 0, new Date()) > 0;
+    }
+
+    @Override
+    public boolean reopen(Long conversationId, Long userId) {
+        AiConversationEntity conv = aiConversationMapper.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            return false;
+        }
+        return aiConversationMapper.updateStatus(conversationId, 1, new Date()) > 0;
+    }
+
+    @Override
+    public boolean delete(Long conversationId, Long userId) {
+        AiConversationEntity conv = aiConversationMapper.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            return false;
+        }
+        return aiConversationMapper.deleteById(conversationId) > 0;
     }
 }

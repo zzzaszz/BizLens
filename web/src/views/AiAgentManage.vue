@@ -7,10 +7,10 @@ export default { name: 'AiAgentManage' }
     <div class="page-head">
       <div>
         <h2>AI 角色</h2>
-        <p>角色由代码项目创建——一个项目只能创建一个角色，且必须配置 API Key 才能发起对话</p>
+        <p>角色由代码项目创建——一个项目可以配置多个角色，且必须配置 API Key 才能发起对话</p>
       </div>
-      <el-button type="primary" :icon="Plus" :disabled="!availableProjects.length" @click="openCreate">
-        {{ availableProjects.length ? '新建角色' : '请先创建代码项目' }}
+      <el-button type="primary" :icon="Plus" :disabled="!creatableProjects.length" @click="openCreate">
+        {{ createButtonText }}
       </el-button>
     </div>
 
@@ -43,23 +43,27 @@ export default { name: 'AiAgentManage' }
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="startChat(row)">对话</el-button>
+          <el-button link type="primary" :loading="startingId === row.id" @click="startChat(row)">对话</el-button>
           <el-button link @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="removeAgent(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <!-- 创建 / 编辑角色弹窗 -->
-    <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" :append-to-body="true">
+    <!-- 创建 / 编辑角色弹窗；align-center 让弹窗垂直居中 -->
+    <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" align-center :append-to-body="true">
       <el-form label-width="90px">
         <el-form-item label="所属项目" required>
           <el-select v-if="!form.id" v-model="form.projectId" placeholder="选择代码项目" style="width:100%">
-            <el-option v-for="p in availableProjects" :key="p.id" :label="p.name" :value="p.id">
+            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id"
+              :disabled="p.status !== 'READY'">
               <span>{{ p.name }}</span>
               <span class="opt-meta">{{ projectStatusText(p.status) }}</span>
             </el-option>
           </el-select>
+          <p v-if="!form.id && projects.some(p => p.status !== 'READY')" class="dialog-tip-inline">
+            灰显的项目尚未完成索引：知识库没有内容时角色答不出业务问题，请先在「代码项目」页排队索引
+          </p>
           <el-input v-else :model-value="projectName(form.projectId)" disabled />
         </el-form-item>
 
@@ -115,6 +119,11 @@ export default { name: 'AiAgentManage' }
         <el-form-item label="API Key" required>
           <el-input v-model="form.apiKey" type="password" show-password clearable
             :placeholder="form.id ? '留空表示不修改' : '模型服务 API Key，未配置无法发起对话'" />
+          <!-- 编辑时输入框必然是空的（不回显 Key），不加这行会被当成"未配置" -->
+          <p v-if="form.id" class="key-state" :class="form.apikeyenc ? 'ok' : 'warn'">
+            <template v-if="form.apikeyenc">当前已配置（{{ form.apikeyenc }}），留空表示不修改</template>
+            <template v-else>当前尚未配置，未配置 Key 的角色无法发起对话</template>
+          </p>
         </el-form-item>
 
         <el-form-item label="采样温度">
@@ -136,7 +145,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import {
   aiAgentList, aiAgentCreate, aiAgentUpdate, aiAgentDelete, aiAgentModels,
-  aiCreateConversation, codeProjectList
+  aiCreateConversation, aiConversations, codeProjectList
 } from '@/api'
 
 const route = useRoute()
@@ -147,6 +156,8 @@ const projects = ref([])
 const formVisible = ref(false)
 const saving = ref(false)
 const loadingModels = ref(false)
+/** 正在打开对话的角色 id，仅用于按钮 loading */
+const startingId = ref(null)
 const modelOptions = ref([])
 /** 模型来源：PROVIDER=厂商接口 / PRESET=预置兜底 / EMPTY=没拿到，用于提示用户 */
 const modelSource = ref(null)
@@ -166,7 +177,7 @@ function emptyForm() {
   return {
     id: null, projectId: null, name: '', avatar: '', systemPrompt: '',
     provider: 'deepseek', apiBaseUrl: 'https://api.deepseek.com',
-    model: '', temperature: 0.7, apiKey: ''
+    model: '', temperature: 0.7, apiKey: '', apikeyenc: ''
   }
 }
 
@@ -178,11 +189,17 @@ const modelSelectOptions = computed(() => {
   return list
 })
 
-/** 已绑定角色的项目 ID —— 一个项目只能创建一个角色 */
-const usedProjectIds = computed(() => new Set(agents.value.map(a => a.projectid)))
+/**
+ * 能建角色的项目：已完成索引即可。
+ * 一个项目可以配置多个角色，所以不再排除"已建过角色"的项目。
+ */
+const creatableProjects = computed(() => projects.value.filter(p => p.status === 'READY'))
 
-/** 还能创建角色的项目 */
-const availableProjects = computed(() => projects.value.filter(p => !usedProjectIds.value.has(p.id)))
+/** 按钮文案要说清为什么不能点，不能一律写"请先创建代码项目" */
+const createButtonText = computed(() => {
+  if (creatableProjects.value.length) return '新建角色'
+  return projects.value.length ? '项目完成索引后才能创建角色' : '请先创建代码项目'
+})
 
 function projectName(projectId) {
   const p = projects.value.find(x => x.id === projectId)
@@ -247,16 +264,26 @@ function resetModelState() {
   modelHint.value = ''
 }
 
+/**
+ * 取 URL 上带的项目ID。
+ * 雪花 ID 经后端序列化后是**字符串**（见 JacksonConfig 的 Long→String），
+ * 这里统一按字符串处理——早先写成 Number() 转数字再与 p.id 比，恒不相等，预选一直是失效的。
+ */
+function queryProjectId() {
+  const raw = route.query.projectId
+  return raw == null || raw === '' ? null : String(raw)
+}
+
 function openCreate() {
   form.value = emptyForm()
   resetModelState()
   // 从「代码项目」页带着 projectId 跳过来时直接预选该项目
-  const fromQuery = Number(route.query.projectId)
-  if (fromQuery && availableProjects.value.some(p => p.id === fromQuery)) {
+  const fromQuery = queryProjectId()
+  if (fromQuery && creatableProjects.value.some(p => String(p.id) === fromQuery)) {
     form.value.projectId = fromQuery
-  } else if (availableProjects.value.length === 1) {
+  } else if (creatableProjects.value.length === 1) {
     // 只剩一个可选项目时也直接预选，少点一次
-    form.value.projectId = availableProjects.value[0].id
+    form.value.projectId = creatableProjects.value[0].id
   }
   formVisible.value = true
   // 此时还没有 Key，后端会回退预置列表，先把下拉填上
@@ -268,7 +295,9 @@ function openEdit(a) {
     id: a.id, projectId: a.projectid, name: a.name, avatar: a.avatar || '',
     systemPrompt: a.systemprompt || '', model: a.model || '',
     provider: a.provider || 'deepseek', apiBaseUrl: a.apibaseurl || '',
-    temperature: a.temperature != null ? Number(a.temperature) : 0.7, apiKey: ''
+    temperature: a.temperature != null ? Number(a.temperature) : 0.7, apiKey: '',
+    // 接口返回的是脱敏串（****xxxx），仅用来告诉用户"Key 已经在了"
+    apikeyenc: a.apikeyenc || ''
   }
   resetModelState()
   formVisible.value = true
@@ -333,21 +362,62 @@ async function removeAgent(a) {
   }
 }
 
+/**
+ * 打开该角色的对话。
+ * <p>
+ * 三件事：① 前置校验 Key 与索引状态，不满足就地引导（原来要等发出第一条消息才报错）；
+ * ② 复用该角色已有的会话——原来每点一次就建一条新的，连点几次就堆几个空会话；
+ * ③ 跳转时带上 conversationId，让对话页直接把这条会话打开（原来只跳到 /ai，什么都不选中）。
+ */
 async function startChat(a) {
+  if (!a.apikeyenc) {
+    ElMessage.warning('该角色尚未配置 API Key，请先补上再对话')
+    openEdit(a)
+    return
+  }
+  const project = projects.value.find(p => p.id === a.projectid)
+  if (!project || project.status !== 'READY') {
+    ElMessage.warning(`项目「${project ? project.name : '—'}」尚未完成索引，请先排队索引`)
+    router.push('/projects')
+    return
+  }
+  startingId.value = a.id
   try {
-    const res = await aiCreateConversation({ agentId: a.id, title: a.name })
-    if (res.code === 200) {
-      ElMessage.success('会话已创建')
-      router.push('/ai')
-    } else {
-      ElMessage.error(res.msg || '创建会话失败')
+    // 会话列表已按 UpdatedAt 倒序，取第一条匹配的就是该角色最近一次会话；
+    // 只认未关闭的（status=1），已关闭的会话应该新建一条而不是把旧的翻出来
+    const convRes = await aiConversations()
+    const list = convRes.code === 200 ? (convRes.data || []) : []
+    let conversation = list.find(c => c.agentid === a.id && c.status === 1)
+    if (!conversation) {
+      const res = await aiCreateConversation({ agentId: a.id, title: a.name })
+      if (res.code !== 200) {
+        ElMessage.error(res.msg || '创建会话失败')
+        return
+      }
+      conversation = res.data
     }
+    router.push({ path: '/ai', query: { conversationId: conversation.id } })
   } catch {
-    ElMessage.error('创建会话失败')
+    ElMessage.error('打开会话失败')
+  } finally {
+    startingId.value = null
   }
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  await loadAll()
+  // 从「代码项目」页点「创建角色」跳过来时，直接把新建弹窗打开并预选该项目，
+  // 少一步"跳过来了还要再点一次新建角色"；不能建的情况就地说明原因，别开一个空弹窗
+  const fromQuery = queryProjectId()
+  if (!fromQuery) return
+  const project = projects.value.find(p => String(p.id) === fromQuery)
+  if (!project) return
+  if (project.status !== 'READY') {
+    ElMessage.warning(`项目「${project.name}」尚未完成索引，请先在「代码项目」页排队索引`)
+    return
+  }
+  openCreate()
+})
 </script>
 
 <style scoped>
@@ -376,6 +446,14 @@ onMounted(loadAll)
 .model-hint.warn { color: var(--warning-color); }
 
 .opt-meta { float: right; color: var(--text-muted); font-size: 12px; }
+
+/* API Key 当前状态提示：编辑弹窗里输入框必然是空的，靠这行说明"其实已经配了" */
+.key-state { width: 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.6; }
+.key-state.ok { color: var(--text-muted); }
+.key-state.warn { color: var(--warning-color); }
+
+.dialog-tip-inline { margin: 4px 0 0; font-size: 12px; color: var(--warning-color); line-height: 1.6; }
+
 .mark-preview {
   display: inline-flex; width: 18px; height: 18px; border-radius: var(--radius-sm);
   color: #fff; align-items: center; justify-content: center; font-size: 10px;

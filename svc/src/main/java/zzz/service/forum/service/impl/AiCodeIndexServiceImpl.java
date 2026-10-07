@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -69,14 +70,18 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     @Async
     public void indexAsync(Long projectId) {
         Path workspace = null;
+        Path isolatedHome = null;
+        AiCodeProjectEntity project = null;
         try {
-            AiCodeProjectEntity project = projectMapper.getById(projectId);
+            project = projectMapper.getById(projectId);
             if (project == null) return;
             projectMapper.updateStatus(projectId, "INDEXING");
             validateGitUrl(project.getGitUrl());
             workspace = Files.createTempDirectory("bizlens-index-");
-            runGitClone(project, workspace);
-            String commit = runGitCommand(workspace, "rev-parse", "HEAD").trim();
+            // 每次索引都给 git 一个"干净的家"：里面没有任何凭据与配置，见 applyIsolatedGitEnv
+            isolatedHome = Files.createTempDirectory("bizlens-git-home-");
+            runGitClone(project, workspace, isolatedHome);
+            String commit = runGitCommand(workspace, isolatedHome, "rev-parse", "HEAD").trim();
             documentMapper.deleteByProject(projectId);
             IndexCounter counter = new IndexCounter();
             final Path root = workspace;
@@ -100,9 +105,10 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         } catch (Exception e) {
             log.warn("code project index failed, projectId={}", projectId, e);
             // 同时写库：前端只看到一个「失败」标签是不够的，要能看到为什么失败
-            projectMapper.markFailed(projectId, sanitizeGitError(e));
+            projectMapper.markFailed(projectId, buildFailureReason(project, e));
         } finally {
             deleteWorkspace(workspace);
+            deleteWorkspace(isolatedHome);
         }
     }
 
@@ -179,20 +185,66 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         return snippet.toString();
     }
 
-    private void runGitClone(AiCodeProjectEntity project, Path workspace) throws Exception {
-        runCommand(workspace.getParent(), "git", "clone", "--depth", "1", "--branch",
+    private void runGitClone(AiCodeProjectEntity project, Path workspace, Path isolatedHome) throws Exception {
+        runCommand(workspace.getParent(), isolatedHome, "git", "clone", "--depth", "1", "--branch",
                 project.getGitBranch(), project.getGitUrl(), workspace.toString());
     }
 
-    private String runGitCommand(Path directory, String... args) throws Exception {
+    private String runGitCommand(Path directory, Path isolatedHome, String... args) throws Exception {
         String[] command = new String[args.length + 1];
         command[0] = "git";
         System.arraycopy(args, 0, command, 1, args.length);
-        return runCommand(directory, command);
+        return runCommand(directory, isolatedHome, command);
     }
 
-    private String runCommand(Path directory, String... command) throws Exception {
-        Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+    /**
+     * 给 git 进程一套"不带任何环境凭据"的运行环境。
+     * <p>
+     * git 默认会自己去找运行机器上的凭据：全局/系统配置里的 credential.helper、
+     * {@code ~/.git-credentials}、{@code ~/.ssh}、SSH agent、系统凭据管理器。
+     * 这些凭据属于"跑这个服务的人"，与 BizLens 的用户授权毫无关系。
+     * 2026-10-07 实测：一个**私有**仓库在项目未配任何凭据的情况下照样被克隆成功，
+     * 用的就是本机 {@code ~/.git-credentials} 里那条 github.com 凭据——
+     * 等于任何注册用户都能借机器身份读私有代码，与"不向客户泄露源码"的产品定位直接冲突。
+     * <p>
+     * 这里把 HOME / 全局配置 / 系统配置统统指向空处并关掉交互提示，
+     * 让 git 只能看到应用显式提供的东西。当前还没有按项目的凭据注入能力，
+     * 所以**私有仓库会直接克隆失败**——这是刻意的：宁可失败，也不要静默借用机器身份。
+     * 后续接入按项目凭据时，在这里把凭据经 {@code GIT_ASKPASS} 注入即可。
+     */
+    private void applyIsolatedGitEnv(ProcessBuilder builder, Path isolatedHome) {
+        Map<String, String> env = builder.environment();
+
+        // HOME 相关的三个变量都改掉：git 找 ~/.gitconfig 和 ~/.git-credentials 靠它们
+        String home = isolatedHome.toAbsolutePath().toString();
+        env.put("HOME", home);
+        env.put("USERPROFILE", home);
+        env.put("XDG_CONFIG_HOME", home);
+
+        // 全局配置指向一个不存在的文件（空目录里没有），系统配置直接禁用
+        env.put("GIT_CONFIG_GLOBAL", isolatedHome.resolve(".gitconfig").toAbsolutePath().toString());
+        env.put("GIT_CONFIG_NOSYSTEM", "1");
+        // 再用 GIT_CONFIG_COUNT 把 credential.helper 显式清空：空值表示重置 helper 列表，
+        // 这样即使将来又冒出来一个系统级 helper 也套不上
+        env.put("GIT_CONFIG_COUNT", "1");
+        env.put("GIT_CONFIG_KEY_0", "credential.helper");
+        env.put("GIT_CONFIG_VALUE_0", "");
+
+        // 不允许交互，也不给 askpass 兜底程序：要么应用自己给了凭据，要么就失败
+        env.put("GIT_TERMINAL_PROMPT", "0");
+        env.remove("GIT_ASKPASS");
+        env.remove("SSH_ASKPASS");
+        // SSH agent 同样是"机器身份"，一并摘掉
+        env.remove("SSH_AUTH_SOCK");
+        env.remove("GIT_SSH_COMMAND");
+    }
+
+    private String runCommand(Path directory, Path isolatedHome, String... command) throws Exception {
+        ProcessBuilder builder = new ProcessBuilder(command)
+                .directory(directory.toFile())
+                .redirectErrorStream(true);
+        applyIsolatedGitEnv(builder, isolatedHome);
+        Process process = builder.start();
         boolean done = process.waitFor(120, TimeUnit.SECONDS);
         if (!done) {
             process.destroyForcibly();
@@ -278,6 +330,33 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
      * Git 报错经常回显完整地址，如果用户把 token 写进了 gitUrl（如 https://user:token@host/repo），
      * 原样落库等于把凭据存进了普通表。
      */
+    /**
+     * 组装落库的失败原因。
+     * <p>
+     * 鉴权类失败要给出可操作的说明：克隆已经不再借用运行机器的凭据，
+     * 而按项目的凭据注入还没做，所以此刻私有仓库必然是失败的——
+     * 用户如果不知道这一点，只会反复去改「Git 凭据」字段（那个字段并不参与克隆）。
+     */
+    private String buildFailureReason(AiCodeProjectEntity project, Exception e) {
+        String reason = sanitizeGitError(e);
+        String lower = reason.toLowerCase(Locale.ROOT);
+        boolean authFailure = lower.contains("terminal prompts disabled")
+                || lower.contains("could not read username")
+                || lower.contains("could not read password")
+                || lower.contains("authentication failed")
+                || lower.contains("permission denied")
+                || lower.contains("publickey")
+                || lower.contains("403");
+        if (authFailure) {
+            return "无法访问该仓库：克隆已停用运行机器的 Git 凭据（不再借用服务账号身份），"
+                    + "按项目的凭据注入尚未实现，因此当前只能索引可匿名访问的仓库；原始错误：" + reason;
+        }
+        if (project != null && project.getCredentialRef() != null && !project.getCredentialRef().trim().isEmpty()) {
+            return "Git 凭据字段不参与克隆，填了也不生效；原始错误：" + reason;
+        }
+        return reason;
+    }
+
     private String sanitizeGitError(Exception e) {
         String message = e.getMessage();
         if (message == null || message.trim().isEmpty()) {

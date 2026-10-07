@@ -16,6 +16,16 @@
         values (#{id}, #{conversationid}, #{sendertype}, #{senderid}, #{content}, #{createtime})
     </insert>
 
+    <select id="getById" resultMap="AiChatMessageMap">
+        select "Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime"
+        from "AiChatMessage"
+        where "Id" = #{id}
+    </select>
+
+    <delete id="deleteById">
+        delete from "AiChatMessage" where "Id" = #{id}
+    </delete>
+
     <select id="listByConversation" resultMap="AiChatMessageMap">
         select "Id", "ConversationId", "SenderType", "SenderId", "Content", "CreateTime"
         from "AiChatMessage"

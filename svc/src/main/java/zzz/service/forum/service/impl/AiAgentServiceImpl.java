@@ -62,8 +62,8 @@ public class AiAgentServiceImpl implements AiAgentService {
     }
 
     @Override
-    public AiAgentEntity getByProjectId(Long projectId) {
-        return projectId == null ? null : aiAgentMapper.getByProjectId(projectId);
+    public List<AiAgentEntity> listByProjectId(Long projectId) {
+        return projectId == null ? Collections.emptyList() : aiAgentMapper.listByProjectId(projectId);
     }
 
     @Override
@@ -76,16 +76,18 @@ public class AiAgentServiceImpl implements AiAgentService {
         if (request.getName() == null || request.getName().trim().isEmpty()) {
             throw new BaseBusinessException("角色名称不能为空");
         }
-        // 业务规则一：角色必须由代码项目创建，且一个项目只能创建一个角色
+        // 业务规则一：角色必须由代码项目创建（一个项目可以配置多个角色，不再限制数量）
         Long projectId = request.getProjectId();
         if (projectId == null) {
             throw new BaseBusinessException("请先选择代码项目：角色必须由代码项目创建");
         }
         AiCodeProjectEntity project = aiCodeProjectService.getOwned(userId, projectId);
-        if (aiAgentMapper.getByProjectId(projectId) != null) {
-            throw new BaseBusinessException("项目「" + project.getName() + "」已创建过角色，一个项目只能创建一个角色");
+        // 业务规则二：项目必须已完成索引。知识库没内容时建了角色也答不了，
+        // 与其等用户发第一条消息才报错，不如在创建这一步就拦住。
+        if (!"READY".equals(project.getStatus())) {
+            throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
         }
-        // 业务规则二：API Key 必填，没有 Key 的角色无法发起对话
+        // 业务规则三：API Key 必填，没有 Key 的角色无法发起对话
         if (request.getApiKey() == null || request.getApiKey().trim().isEmpty()) {
             throw new BaseBusinessException("请填写 API Key：角色必须配置 API Key 才能发起对话");
         }

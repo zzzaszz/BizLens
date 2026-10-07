@@ -17,7 +17,7 @@ public class AiAgentEntity implements Serializable {
     private Long id;
     /** 创建者ID */
     private Long userid;
-    /** 所属代码项目ID（角色必须由项目创建，一个项目最多一个角色） */
+    /** 所属代码项目ID（角色必须由项目创建，一个项目可以配置多个角色） */
     private Long projectid;
     /** 角色名称 */
     private String name;
