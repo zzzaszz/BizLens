@@ -4,12 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import zzz.service.forum.ai.AiMessage;
-import zzz.service.forum.ai.AiProvider;
-import zzz.service.forum.ai.AiRequest;
-import zzz.service.forum.ai.AiResponse;
-import zzz.service.forum.ai.AiSafetyGuard;
-import zzz.service.forum.ai.AiStreamListener;
+import zzz.service.forum.ai.*;
 import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.AiChatMessageEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
@@ -17,12 +12,7 @@ import zzz.service.forum.domain.AiConversationEntity;
 import zzz.service.forum.domain.dto.AiCodeChunkHit;
 import zzz.service.forum.domain.dto.AiCreateConversationRequest;
 import zzz.service.forum.domain.dto.AiSendRequest;
-import zzz.service.forum.service.AiAgentService;
-import zzz.service.forum.service.AiChatMessageService;
-import zzz.service.forum.service.AiCodeProjectService;
-import zzz.service.forum.service.AiConversationService;
-import zzz.service.forum.service.AiService;
-import zzz.service.forum.service.RedisService;
+import zzz.service.forum.service.*;
 import zzz.service.forum.utils.BaseBusinessException;
 import zzz.service.forum.utils.CryptoService;
 
@@ -40,13 +30,21 @@ public class AiServiceImpl implements AiService {
 
     private static final Logger log = LoggerFactory.getLogger(AiServiceImpl.class);
 
-    /** 组装模型上下文时携带的最近消息条数 */
+    /**
+     * 组装模型上下文时携带的最近消息条数
+     */
     private static final int CONTEXT_RECENT = 20;
-    /** 单条消息最大长度（超出截断，控制 token 成本） */
+    /**
+     * 单条消息最大长度（超出截断，控制 token 成本）
+     */
     private static final int MAX_MESSAGE_LENGTH = 2000;
-    /** 限流 key 前缀：ai:chat:rate:{userId} */
+    /**
+     * 限流 key 前缀：ai:chat:rate:{userId}
+     */
     private static final String RATE_KEY_PREFIX = "ai:chat:rate:";
-    /** 每分钟最多调用次数 */
+    /**
+     * 每分钟最多调用次数
+     */
     private static final int RATE_LIMIT = 20;
 
     /**
@@ -54,28 +52,55 @@ public class AiServiceImpl implements AiService {
      * 没有它，buildMessages 会一条 system 消息都不加，模型就以裸模型身份回话
      * （表现是自称"我是 DeepSeek……"），这也是角色设定为空时的默认行为。
      */
+//    private static final String DEFAULT_SYSTEM_PROMPT =
+//            "你是 BizLens AI 的业务问答助手。职责是解释代码背后的业务规则和处理流程，帮助用户理解业务，而不是提供代码。"
+//            + "你可以说明业务含义、状态流转、校验规则和处理步骤。"
+//            + "业务上需要用到的标识必须明确给出——权限编码、模块编码、状态值、接口路径与请求方式、字段的业务含义，"
+//            + "这些是用户配置和排障时要照抄的东西，含糊成「某条权限」「某个字段」会让答案没法用。"
+//            + "真正不能输出的是：源代码正文、SQL 语句、配置文件内容、密钥/Token/密码、仓库内部路径。";
     private static final String DEFAULT_SYSTEM_PROMPT =
-            "你是 BizLens AI 的业务问答助手。职责是解释代码背后的业务规则和处理流程，帮助用户理解业务，而不是提供代码。"
-            + "你可以说明业务含义、状态流转、校验规则和处理步骤，但不得输出源代码、SQL、配置、密钥或内部文件路径。";
+            "你是 BizLens AI 的内部开发与运维助手。"
+                    + "可以直接分析和提供项目源码、Java、Vue、SQL、YAML、JSON、配置等内容。"
+                    + "可以直接回答接口路径、权限编码、模块编码、字段、表名、方法等信息。"
+                    + "如果接口方法继承自父类，应继续分析父类中的实现和注解。"
+                    + "根据代码库检索结果准确回答，不要编造不存在的内容。";
 
-    /** 召回成功时注入的上下文抬头与使用约束 */
-    private static final String KNOWLEDGE_PREFIX =
+    /**
+     * 召回成功时注入的上下文抬头与使用约束
+     */
+    /*private static final String KNOWLEDGE_PREFIX =
             "以下是系统从项目「%s」的代码库中按关键词检索到的片段，供你理解业务逻辑。\n"
-            + "使用约束：\n"
-            + "1. 只基于这些片段解释业务规则与处理流程，不要臆测片段之外的实现。\n"
-            + "2. 严禁把片段里的源代码、SQL、字段名原文复述给用户——用业务语言转述。\n"
-            + "3. 片段不足以回答时，如实说明还缺什么信息，不要编造。\n";
+                    + "使用约束：\n"
+                    + "1. 只基于这些片段解释业务规则与处理流程，不要臆测片段之外的实现。\n"
+                    + "2. 不要把片段里的源代码正文或 SQL 语句整段复述给用户，用业务语言转述；\n"
+                    + "   但**业务标识要如实给出**——权限编码（形如「模块.动作」）、模块编码、状态值、接口路径与请求方式、\n"
+                    + "   字段与表的业务含义，都是用户配置和排障时要用的，不要用「某条权限」「某个字段」含糊掉，也不要拒绝提供。\n"
+                    + "3. 片段不足以回答时，如实说明还缺什么信息，不要编造。\n";*/
+    private static final String KNOWLEDGE_PREFIX =
+            "以下是系统从项目「%s」的代码库中检索到的相关片段。\n"
+                    + "用户是内部开发和运维人员，可以直接使用这些代码和项目内容回答问题。\n"
+                    + "可以直接提供源码、SQL、配置、接口路径、权限编码等内容。\n"
+                    + "如果涉及父类继承，应结合父类代码一起分析。\n"
+                    + "检索结果不足时不要编造。";
 
-    /** 召回为空时如实告知模型，避免它一本正经地编业务规则 */
+    /**
+     * 召回为空时如实告知模型，避免它一本正经地编业务规则
+     */
     private static final String NO_KNOWLEDGE_HINT =
             "本轮没有从项目「%s」的代码库中检索到相关片段。请如实告知用户当前无法基于该项目回答，"
-            + "并建议他把问题描述得更具体（例如提到具体的业务名称、单据、字段或操作），不要编造业务规则。";
+                    + "并建议他把问题描述得更具体（例如提到具体的业务名称、单据、字段或操作），不要编造业务规则。";
 
-    /** 流式增量事件：每段增量各自推一条，前端逐段追加，形成打字机效果 */
+    /**
+     * 流式增量事件：每段增量各自推一条，前端逐段追加，形成打字机效果
+     */
     private static final String EVENT_DELTA = "delta";
-    /** 流正常结束。带空 data——全文已由 delta 推完，这里再带一次全文会让前端重复追加 */
+    /**
+     * 流正常结束。带空 data——全文已由 delta 推完，这里再带一次全文会让前端重复追加
+     */
     private static final String EVENT_DONE = "done";
-    /** 安全拦截：要求前端把已显示的内容整段替换掉（增量已经出去了，收不回来，只能纠正） */
+    /**
+     * 安全拦截：要求前端把已显示的内容整段替换掉（增量已经出去了，收不回来，只能纠正）
+     */
     private static final String EVENT_RESET = "reset";
 
     @Resource
@@ -321,7 +346,9 @@ public class AiServiceImpl implements AiService {
 
     // ==================== 私有方法 ====================
 
-    /** 校验会话归属 + 用户限流 + 消息截断 */
+    /**
+     * 校验会话归属 + 用户限流 + 消息截断
+     */
     private AiConversationEntity checkAndPrepare(Long userId, AiSendRequest request) {
         if (!checkRateLimit(userId)) {
             throw new BaseBusinessException("请求过于频繁，请稍后再试");
@@ -351,7 +378,9 @@ public class AiServiceImpl implements AiService {
         return conv;
     }
 
-    /** 解析会话绑定的角色；不存在直接拒绝 */
+    /**
+     * 解析会话绑定的角色；不存在直接拒绝
+     */
     private AiAgentEntity requireAgent(AiConversationEntity conv) {
         if (conv.getAgentid() == null) {
             throw new BaseBusinessException("会话未绑定角色：请先创建代码项目，再为项目创建角色");
@@ -406,7 +435,9 @@ public class AiServiceImpl implements AiService {
         return messages;
     }
 
-    /** 组装 AiRequest 的调用参数；API Key 仅在此处解密，用完即弃、不落日志 */
+    /**
+     * 组装 AiRequest 的调用参数；API Key 仅在此处解密，用完即弃、不落日志
+     */
     private AiRequest buildAiRequest(AiAgentEntity agent, List<AiMessage> messages) {
         AiRequest aiRequest = AiRequest.of(agent.getModel(), messages);
         aiRequest.setApiKey(cryptoService.decrypt(agent.getApikeyenc()));
@@ -415,7 +446,9 @@ public class AiServiceImpl implements AiService {
         return aiRequest;
     }
 
-    /** 用户维度限流（Redis 每分钟计数，第一次置 60s 过期） */
+    /**
+     * 用户维度限流（Redis 每分钟计数，第一次置 60s 过期）
+     */
     private boolean checkRateLimit(Long userId) {
         String key = RATE_KEY_PREFIX + userId;
         Long count = redisService.increment(key, 1);

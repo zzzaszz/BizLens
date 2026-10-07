@@ -7,7 +7,8 @@ BizLens AI 是面向企业代码知识库的业务问答系统。系统通过 AI
 - 用户注册、登录、JWT 会话和 Redis 限流
 - AI 会话、历史消息、SSE 对话和 AI 角色管理
 - 会话历史可回溯、可续聊：列表返回全部状态（含已关闭），已关闭会话能翻回来看历史，发送消息时自动重新打开继续
-- 回答按 Markdown 渲染（自带轻量渲染器，先转义再套标签，不引第三方库）；首字未到时显示「思考中」实时计时，结束后给出「思考 x.xs · 本次回答 x.xs」
+- 回答按 Markdown 渲染（自带轻量渲染器，先转义再套标签，不引第三方库）；首字未到时显示「思考中」实时计时，结束后给出「思考 x.xs ·
+  本次回答 x.xs」
 - 消息与会话都可右键删除：删消息只删单条，删会话连带其全部消息一起删（都同步清理 Redis 热上下文）
 - 操作前置校验统一：建会话/建角色时即校验 API Key、项目索引状态，不满足就地提示；未就绪项目不允许建角色
 - 角色与代码项目多对多：一个角色可覆盖多个项目（如前后端共用一个角色），一个项目也可建多个角色；
@@ -57,7 +58,9 @@ docs/    项目开发文档与开发日志
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-indexerror.sql     # ai_code_project.last_error
    ```
 
-   `migration-*-projectid.sql` 会清理与新模型不兼容的历史角色（旧模型下角色不与项目绑定），**执行前请备份 `"AiAgent"`**。`sourcesnippet` 只加列不删数据，但历史切片的该列为空，需要在「代码项目」页对每个项目**重新排队索引**一次才会填充——不重新索引会导致对话时召回不到任何内容。
+   `migration-*-projectid.sql` 会清理与新模型不兼容的历史角色（旧模型下角色不与项目绑定），**执行前请备份 `"AiAgent"`**。
+   `sourcesnippet` 只加列不删数据，但历史切片的该列为空，需要在「代码项目」页对每个项目**重新排队索引**
+   一次才会填充——不重新索引会导致对话时召回不到任何内容。
 
    新出现的列若未同步，接口会直接报 `column ... does not exist`（如「代码项目」页加载时就调用的 `/ai/project/list`）。
 
@@ -161,7 +164,8 @@ docs/    项目开发文档与开发日志
 - [x] 放开「一个项目一个角色」的限制（含 `migration-20261007-multiagent.sql` 删唯一索引），代码项目页展示全部角色
 - [x] 统一「代码项目」与「AI 角色」两页布局；角色弹窗垂直居中；左侧菜单改为 工作台 / 业务问答 / AI 角色 / 代码项目
 - [x] **切断索引克隆对运行机器凭据的继承**（不再借用服务账号身份读私有仓库）
-- [x] **按项目配置 Git 访问令牌**（AES 加密落库、经 credential.helper 注入）：GitHub / Gitee / GitLab / 自建 GitLab 的私有仓库可正常索引，机器凭据依旧不参与
+- [x] **按项目配置 Git 访问令牌**（AES 加密落库、经 credential.helper 注入）：GitHub / Gitee / GitLab / 自建 GitLab
+  的私有仓库可正常索引，机器凭据依旧不参与
 - [x] 流式接口鉴权失败返回 SSE error 事件（此前是空 body 的 HTTP 500）
 - [x] SSE 打字机效果：逐段推送 `delta` 事件；安全拦截命中时用 `reset` 事件整段替换为拒答
 - [x] 新增全局异常处理器兜底，接口异常统一返回 `R`，不再出现空 body 的 HTTP 500
@@ -222,6 +226,8 @@ docs/    项目开发文档与开发日志
 7. 持久化 `ai_security_audit` 审计记录并增加权限分级、告警和运营监控。
 8. 列表接口分页。`pagehelper` 因与 mybatis-plus 的版本冲突已移除，`/ai/conversations`、
    `/ai/project/list`、`/ai/agent/list` 目前都是全量返回，数据量上来后需要补分页。
+9. 应该增加关键词检索能力，代码关联检索 / 二次召回机制。比如:关键词检索-> 发现 extends PipermissionController->自动检索
+   PipermissionController ->发现 getEntity->继续获取父类方法和注解->交给 AI
 
 ### 已知限制与待优化
 
