@@ -12,11 +12,22 @@ public interface AiCodeProjectMapper {
 
     List<AiCodeProjectEntity> listByUser(@Param("userId") Long userId);
 
+    List<AiCodeProjectEntity> pageByUser(@Param("userId") Long userId,
+                                         @Param("offset") long offset,
+                                         @Param("pageSize") int pageSize);
+
+    long countByUser(@Param("userId") Long userId);
+
     int insert(AiCodeProjectEntity entity);
 
     int update(AiCodeProjectEntity entity);
 
     int updateStatus(@Param("id") Long id, @Param("status") String status);
+
+    int startIndex(@Param("id") Long id, @Param("totalFiles") int totalFiles);
+
+    int updateIndexProgress(@Param("id") Long id, @Param("processedFiles") int processedFiles,
+                            @Param("skippedFiles") int skippedFiles);
 
     /** 索引成功：置 READY、回写 commit 与本次耗时 */
     int markIndexed(@Param("id") Long id, @Param("status") String status,

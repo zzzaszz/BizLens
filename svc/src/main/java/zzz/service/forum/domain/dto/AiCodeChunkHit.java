@@ -34,4 +34,10 @@ public class AiCodeChunkHit implements Serializable {
     private Integer score;
     /** 是否由一跳继承关系补充 */
     private boolean inherited;
+    /** 是否属于文件级完整检索结果；此类结果不受普通召回条数限制。 */
+    private boolean completeFile;
+    /** 调用链中的层级，种子节点为 0。 */
+    private Integer relationDepth;
+    /** 从当前节点向下追踪时使用的关系类型。 */
+    private String relationType;
 }

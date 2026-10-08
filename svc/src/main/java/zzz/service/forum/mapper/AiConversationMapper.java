@@ -17,6 +17,13 @@ public interface AiConversationMapper {
 
     List<AiConversationEntity> listByUser(@Param("userId") Long userId);
 
+    List<AiConversationEntity> pageByUser(@Param("userId") Long userId,
+                                         @Param("offset") long offset,
+                                         @Param("pageSize") int pageSize,
+                                         @Param("status") Integer status);
+
+    long countByUser(@Param("userId") Long userId, @Param("status") Integer status);
+
     int insert(AiConversationEntity entity);
 
     /** 删除会话；其消息由外键 ON DELETE CASCADE 一并清理 */

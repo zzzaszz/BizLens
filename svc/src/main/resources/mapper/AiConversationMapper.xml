@@ -24,7 +24,22 @@
         select "Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt"
         from "AiConversation"
         where "UserId" = #{userId}
-        order by "UpdatedAt" desc
+        order by "UpdatedAt" desc, "Id" desc
+    </select>
+
+    <select id="pageByUser" resultMap="AiConversationMap">
+        select "Id", "UserId", "AgentId", "Title", "Status", "CreatedAt", "UpdatedAt"
+        from "AiConversation"
+        where "UserId" = #{userId}
+        <if test="status != null">and "Status" = #{status}</if>
+        order by "UpdatedAt" desc, "Id" desc
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="long">
+        select count(*) from "AiConversation"
+        where "UserId" = #{userId}
+        <if test="status != null">and "Status" = #{status}</if>
     </select>
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiConversationEntity">

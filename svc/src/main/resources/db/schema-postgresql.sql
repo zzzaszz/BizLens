@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS "User" (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username ON "User" (Username);
 CREATE INDEX IF NOT EXISTS idx_user_status ON "User" (Status, Deleted);
 
--- 代码知识库：只保存索引、摘要和元数据，源码默认不落库。
+-- 代码知识库：保存索引、摘要、元数据和受预算控制的源码片段；源码只作为受控召回上下文。
 -- 排在 "AiAgent" 之前，因为角色要外键引用它。
 CREATE TABLE IF NOT EXISTS ai_code_project (
     id              BIGINT PRIMARY KEY,
@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS ai_code_project (
     last_indexed_at TIMESTAMP,
     -- 最近一次成功索引的耗时（毫秒），用于页面上估算"还要多久"
     last_index_ms   BIGINT,
-    created_by      BIGINT REFERENCES "User" (id) ON DELETE SET NULL,
+    index_total_files INTEGER NOT NULL DEFAULT 0,
+    index_processed_files INTEGER NOT NULL DEFAULT 0,
+    index_skipped_files INTEGER NOT NULL DEFAULT 0,
+    created_by      BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -71,7 +74,7 @@ CREATE TABLE IF NOT EXISTS "AiAgent" (
     "ApiKeyEnc"    VARCHAR(512),
     "CreatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE SET NULL
+    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" ("Id") ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_agent_user ON "AiAgent" ("UserId", "Enabled");
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_code_user ON "AiAgent" ("UserId", "Code") WHERE "Code" IS NOT NULL;
@@ -95,7 +98,7 @@ CREATE TABLE IF NOT EXISTS "AiConversation" (
     "Status"         SMALLINT NOT NULL DEFAULT 1,
     "CreatedAt"      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_conversation_user FOREIGN KEY ("UserId") REFERENCES "User" (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_conversation_user FOREIGN KEY ("UserId") REFERENCES "User" ("Id") ON DELETE CASCADE,
     CONSTRAINT fk_ai_conversation_agent FOREIGN KEY ("AgentId") REFERENCES "AiAgent" ("Id") ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_conversation_user ON "AiConversation" ("UserId", "Status", "UpdatedAt" DESC);
@@ -155,7 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_code_relation_target ON ai_code_relation (target_
 
 CREATE TABLE IF NOT EXISTS ai_security_audit (
     id              BIGINT PRIMARY KEY,
-    user_id         BIGINT REFERENCES "User" (id) ON DELETE SET NULL,
+    user_id         BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
     project_id      BIGINT REFERENCES ai_code_project (id) ON DELETE SET NULL,
     question        TEXT NOT NULL,
     retrieval_meta  JSONB NOT NULL DEFAULT '{}'::jsonb,

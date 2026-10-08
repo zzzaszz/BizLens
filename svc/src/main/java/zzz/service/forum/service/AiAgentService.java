@@ -4,6 +4,7 @@ import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.dto.AiAgentRequest;
 import zzz.service.forum.domain.dto.AiModelListRequest;
 import zzz.service.forum.domain.dto.AiModelListResponse;
+import zzz.service.forum.domain.dto.PageResult;
 
 import java.util.List;
 
@@ -19,6 +20,8 @@ public interface AiAgentService {
 
     /** 当前用户创建的角色 */
     List<AiAgentEntity> listForUser(Long userId);
+
+    PageResult<AiAgentEntity> pageForUser(Long userId, int page, int pageSize);
 
     /** 创建角色（必须绑定一个属于当前用户的代码项目） */
     AiAgentEntity create(Long userId, AiAgentRequest request);

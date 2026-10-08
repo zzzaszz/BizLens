@@ -20,6 +20,12 @@ public interface AiAgentMapper {
     /** 当前用户创建的角色（均启用） */
     List<AiAgentEntity> listForUser(@Param("userId") Long userId);
 
+    List<AiAgentEntity> pageForUser(@Param("userId") Long userId,
+                                  @Param("offset") long offset,
+                                  @Param("pageSize") int pageSize);
+
+    long countForUser(@Param("userId") Long userId);
+
     int insert(AiAgentEntity entity);
 
     int update(AiAgentEntity entity);

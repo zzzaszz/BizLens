@@ -11,6 +11,7 @@ import zzz.service.forum.domain.dto.AiAgentRequest;
 import zzz.service.forum.domain.dto.AiModelListRequest;
 import zzz.service.forum.domain.dto.AiAgentProjectRef;
 import zzz.service.forum.domain.dto.AiModelListResponse;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.mapper.AiAgentMapper;
 import zzz.service.forum.mapper.AiAgentProjectMapper;
 import zzz.service.forum.service.AiAgentService;
@@ -147,6 +148,16 @@ public class AiAgentServiceImpl implements AiAgentService {
         List<AiAgentEntity> agents = aiAgentMapper.listForUser(userId);
         fillProjectIds(agents, userId);
         return agents;
+    }
+
+    @Override
+    public PageResult<AiAgentEntity> pageForUser(Long userId, int page, int pageSize) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(pageSize, 1), 100);
+        long offset = (long) (safePage - 1) * safeSize;
+        List<AiAgentEntity> agents = aiAgentMapper.pageForUser(userId, offset, safeSize);
+        fillProjectIds(agents, null);
+        return new PageResult<>(agents, aiAgentMapper.countForUser(userId), safePage, safeSize);
     }
 
     @Override

@@ -2,11 +2,14 @@ package zzz.service.forum.service;
 
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiCodeProjectRequest;
+import zzz.service.forum.domain.dto.PageResult;
 
 import java.util.List;
 
 public interface AiCodeProjectService {
     List<AiCodeProjectEntity> listByUser(Long userId);
+
+    PageResult<AiCodeProjectEntity> pageByUser(Long userId, int page, int pageSize);
 
     /** 按主键查询（不校验归属，调用方自行判断） */
     AiCodeProjectEntity getById(Long projectId);

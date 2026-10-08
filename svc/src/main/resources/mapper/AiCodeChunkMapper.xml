@@ -9,6 +9,152 @@
                 CAST(#{metadata} AS jsonb), #{createdAt})
     </insert>
 
+    <delete id="deleteRelationsByProject">
+        DELETE FROM ai_code_relation WHERE project_id = #{projectId}
+    </delete>
+
+    <select id="findRelationCandidates" resultType="zzz.service.forum.domain.dto.AiCodeRelationCandidate">
+        SELECT s.id AS source_chunk_id, t.id AS target_chunk_id, 'CALL' AS relation_type
+        FROM ai_code_chunk s
+        JOIN ai_code_document sd ON sd.id = s.document_id
+        JOIN ai_code_chunk sf ON sf.document_id = s.document_id AND sf.chunk_type = 'FILE'
+        JOIN ai_code_chunk t ON t.id != s.id
+        JOIN ai_code_document td ON td.id = t.document_id AND td.project_id = sd.project_id
+        WHERE sd.project_id = #{projectId}
+          AND s.chunk_type IN ('METHOD', 'FUNCTION', 'MAPPER')
+          AND t.chunk_type IN ('METHOD', 'FUNCTION', 'MAPPER')
+          AND t.symbol_name IS NOT NULL
+          AND length(t.symbol_name) >= 3
+          AND COALESCE(s.source_snippet, sf.source_snippet) IS NOT NULL
+          AND COALESCE(s.source_snippet, sf.source_snippet) ILIKE '%' || t.symbol_name || '%'
+          AND (lower(td.path) LIKE '%service%'
+               OR lower(td.path) LIKE '%mapper%'
+               OR t.chunk_type = 'MAPPER')
+        UNION ALL
+        SELECT s.id AS source_chunk_id, t.id AS target_chunk_id, 'TABLE' AS relation_type
+        FROM ai_code_chunk s
+        JOIN ai_code_document sd ON sd.id = s.document_id
+        JOIN ai_code_chunk t ON t.id != s.id
+        JOIN ai_code_document td ON td.id = t.document_id AND td.project_id = sd.project_id
+        WHERE sd.project_id = #{projectId}
+          AND s.chunk_type IN ('MAPPER', 'SQL')
+          AND t.chunk_type = 'TABLE'
+          AND t.symbol_name IS NOT NULL
+          AND length(t.symbol_name) >= 2
+          AND s.source_snippet IS NOT NULL
+          AND s.source_snippet ILIKE '%' || t.symbol_name || '%'
+    </select>
+
+    <insert id="insertRelation">
+        INSERT INTO ai_code_relation
+            (id, project_id, source_chunk_id, target_chunk_id, relation_type)
+        VALUES (#{id}, #{projectId}, #{sourceChunkId}, #{targetChunkId}, #{relationType})
+        ON CONFLICT (source_chunk_id, target_chunk_id, relation_type) DO NOTHING
+    </insert>
+
+    <select id="searchFiles" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0) AS end_line,
+               (
+               <foreach collection="keywords" item="kw" separator="+">
+                   (CASE WHEN d.path ILIKE '%' || #{kw} || '%' THEN 8 ELSE 0 END
+                   + CASE WHEN c.symbol_name ILIKE '%' || #{kw} || '%' THEN 6 ELSE 0 END
+                   + CASE WHEN c.source_snippet ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END)
+               </foreach>
+               ) AS score
+        FROM ai_code_chunk c
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE c.chunk_type = 'FILE'
+          AND d.project_id IN
+              <foreach collection="projectIds" item="pid" open="(" separator="," close=")">#{pid}</foreach>
+          AND (
+              <foreach collection="keywords" item="kw" separator="OR">
+                  d.path ILIKE '%' || #{kw} || '%'
+                  OR c.symbol_name ILIKE '%' || #{kw} || '%'
+                  OR c.source_snippet ILIKE '%' || #{kw} || '%'
+              </foreach>
+          )
+        ORDER BY score DESC, d.path ASC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listSymbolsByDocuments" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0) AS end_line,
+               0 AS score
+        FROM ai_code_chunk c
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE c.chunk_type != 'FILE'
+          AND c.document_id IN
+              <foreach collection="documentIds" item="did" open="(" separator="," close=")">#{did}</foreach>
+        ORDER BY d.path ASC, COALESCE((c.metadata ->> 'startLine')::int, 0) ASC, c.id ASC
+    </select>
+
+    <select id="findCallChain" resultMap="hitMap">
+        WITH RECURSIVE graph AS (
+            SELECT r.source_chunk_id,
+                   r.target_chunk_id,
+                   r.relation_type,
+                   1 AS depth,
+                   ARRAY[r.source_chunk_id, r.target_chunk_id] AS visited
+            FROM ai_code_relation r
+            WHERE r.source_chunk_id IN
+                  <foreach collection="chunkIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            UNION ALL
+            SELECT g.source_chunk_id,
+                   r.target_chunk_id,
+                   r.relation_type,
+                   g.depth + 1,
+                   g.visited || r.target_chunk_id
+            FROM graph g
+            JOIN ai_code_relation r ON r.source_chunk_id = g.target_chunk_id
+            WHERE g.depth &lt; #{maxDepth}
+              AND NOT (r.target_chunk_id = ANY(g.visited))
+        ), ranked AS (
+            SELECT target_chunk_id, relation_type, depth,
+                   row_number() OVER (PARTITION BY target_chunk_id ORDER BY depth, relation_type) AS rn
+            FROM graph
+        )
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0) AS end_line,
+               0 AS score,
+               ranked.depth AS relation_depth,
+               ranked.relation_type
+        FROM ranked
+        JOIN ai_code_chunk c ON c.id = ranked.target_chunk_id
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE ranked.rn = 1
+        ORDER BY ranked.depth ASC, d.path ASC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
     <resultMap id="hitMap" type="zzz.service.forum.domain.dto.AiCodeChunkHit">
         <result property="chunkId" column="chunk_id"/>
         <result property="documentId" column="document_id"/>
@@ -22,6 +168,8 @@
         <result property="startLine" column="start_line"/>
         <result property="endLine" column="end_line"/>
         <result property="score" column="score"/>
+        <result property="relationDepth" column="relation_depth"/>
+        <result property="relationType" column="relation_type"/>
     </resultMap>
 
     <!--

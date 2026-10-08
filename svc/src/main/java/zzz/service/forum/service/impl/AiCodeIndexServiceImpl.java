@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import zzz.service.forum.domain.AiCodeChunkEntity;
 import zzz.service.forum.domain.AiCodeDocumentEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
+import zzz.service.forum.domain.dto.AiCodeRelationCandidate;
 import zzz.service.forum.ai.CodeSymbolExtractor;
 import zzz.service.forum.mapper.AiCodeChunkMapper;
 import zzz.service.forum.mapper.AiCodeDocumentMapper;
@@ -54,7 +55,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private static final Logger log = LoggerFactory.getLogger(AiCodeIndexServiceImpl.class);
     private static final int MAX_FILES = 2000;
     private static final long MAX_FILE_BYTES = 2 * 1024 * 1024L;
-    private static final int MAX_SYMBOLS_PER_FILE = 200;
+    private static final int MAX_SYMBOLS_PER_FILE = 2000;
     /** 索引工作区目录前缀（克隆下来的代码放这里，用完删） */
     private static final String INDEX_WORK_PREFIX = "bizlens-index-";
     /** git 隔离 HOME 目录前缀（里面只有配置，没有凭据） */
@@ -66,6 +67,10 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private static final long STALE_WORKSPACE_HOURS = 1;
     /** 索引心跳间隔（秒）：运行期间定期推进 updated_at */
     private static final int HEARTBEAT_SECONDS = 30;
+    /** 单条 Git 命令最长运行时间，避免网络异常让异步任务无期限占用线程。 */
+    private static final int GIT_COMMAND_TIMEOUT_SECONDS = 120;
+    /** 克隆失败时最多重试一次，仅对明确的瞬时网络错误重试。 */
+    private static final int GIT_CLONE_ATTEMPTS = 2;
     /**
      * 心跳宽限（秒）：超过这么久没有心跳就认为索引进程已经没了。
      * 取心跳间隔的 6 倍，留足网络/GC 抖动余量；前端用它判断"索引中"还是"已中断"。
@@ -143,7 +148,6 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             cleanStaleWorkspaces();
             project = projectMapper.getById(projectId);
             if (project == null) return;
-            projectMapper.updateStatus(projectId, "INDEXING");
             // 心跳：让"这个 INDEXING 是真在跑还是进程已经没了"可判断（见 HEARTBEAT_* 常量）
             heartbeat = startHeartbeat(projectId);
             validateGitUrl(project.getGitUrl());
@@ -155,27 +159,36 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             runGitClone(project, workspace, isolatedHome);
             String commit = runGitCommand(workspace, isolatedHome, "rev-parse", "HEAD").trim();
             documentMapper.deleteByProject(projectId);
+            int totalFiles = countIndexableFiles(workspace);
+            projectMapper.startIndex(projectId, totalFiles);
             IndexCounter counter = new IndexCounter();
             final Path root = workspace;
             Files.walkFileTree(workspace, new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (counter.count >= MAX_FILES || attrs.size() > MAX_FILE_BYTES) return FileVisitResult.CONTINUE;
-                    if (isIndexable(file) && !isIgnored(root, file)) {
-                        try {
-                            indexFile(projectId, root, file, attrs.size());
-                            counter.count++;
-                        } catch (Exception e) {
-                            log.warn("skip code file {}: {}", file, e.getMessage());
-                        }
+                    if (!isIndexable(file) || isIgnored(root, file)) return FileVisitResult.CONTINUE;
+                    counter.processed++;
+                    if (counter.processed > MAX_FILES || attrs.size() > MAX_FILE_BYTES) {
+                        counter.skipped++;
+                        updateProgress(projectId, counter, totalFiles);
+                        return FileVisitResult.CONTINUE;
                     }
+                    try {
+                        indexFile(projectId, root, file, attrs.size());
+                        counter.indexed++;
+                    } catch (Exception e) {
+                        counter.skipped++;
+                        log.warn("skip code file {}: {}", file, e.getMessage());
+                    }
+                    updateProgress(projectId, counter, totalFiles);
                     return FileVisitResult.CONTINUE;
                 }
             });
+            rebuildRelations(projectId);
             long durationMs = System.currentTimeMillis() - startedAt;
             projectMapper.markIndexed(projectId, "READY", commit, durationMs);
-            log.info("code project indexed, projectId={}, files={}, commit={}, durationMs={}",
-                    projectId, counter.count, commit, durationMs);
+            log.info("code project indexed, projectId={}, files={}, skipped={}, total={}, commit={}, durationMs={}",
+                    projectId, counter.indexed, counter.skipped, totalFiles, commit, durationMs);
         } catch (Exception e) {
             log.warn("code project index failed, projectId={}", projectId, e);
             // 同时写库：前端只看到一个「失败」标签是不够的，要能看到为什么失败
@@ -191,6 +204,29 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             }
             if (isolatedHome != null) {
                 ACTIVE_WORKSPACES.remove(isolatedHome);
+            }
+        }
+    }
+
+    private int countIndexableFiles(Path root) throws IOException {
+        final int[] total = {0};
+        Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (isIndexable(file) && !isIgnored(root, file)) total[0]++;
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return total[0];
+    }
+
+    private void updateProgress(Long projectId, IndexCounter counter, int totalFiles) {
+        // 每 10 个文件写一次，最后一个文件始终写入，减少大仓库的数据库写放大。
+        if (counter.processed == totalFiles || counter.processed % 10 == 0) {
+            try {
+                projectMapper.updateIndexProgress(projectId, counter.processed, counter.skipped);
+            } catch (Exception e) {
+                log.debug("索引进度写入失败: {}", e.getMessage());
             }
         }
     }
@@ -341,7 +377,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         chunk.setChunkType("FILE");
         chunk.setSymbolName(document.getSymbolName());
         chunk.setBusinessSummary(document.getSummary());
-        chunk.setSourceSnippet(sliceLines(lines, 1, lines.length, MAX_FILE_HEAD_CHARS));
+        // FILE 切片保存完整正文，文件级检索才能在需要时覆盖整个文件；普通召回仍由上下文预算控制。
+        chunk.setSourceSnippet(text);
         chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
         chunk.setCreatedAt(now);
         chunkMapper.insert(chunk);
@@ -349,18 +386,42 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         int symbolCount = 0;
         for (CodeSymbolExtractor.Symbol symbol : symbolExtractor.extract(language, text)) {
             if (symbolCount++ >= MAX_SYMBOLS_PER_FILE) break;
-            if (!budget.tryConsume(MAX_SNIPPET_CHARS)) break;
             AiCodeChunkEntity symbolChunk = new AiCodeChunkEntity();
             symbolChunk.setId(snowflakeIdGenerator.nextId());
             symbolChunk.setDocumentId(document.getId());
             symbolChunk.setChunkType(symbol.getType());
             symbolChunk.setSymbolName(symbol.getName());
             symbolChunk.setBusinessSummary(symbol.getSummary() + "，文件 " + relativePath);
-            symbolChunk.setSourceSnippet(sliceLines(lines, symbol.getStartLine(), symbol.getEndLine(), MAX_SNIPPET_CHARS));
+            // 超出源码预算时仍保存符号名和行号，文件级完整检索不能因单个大文件而遗漏方法目录。
+            String snippet = budget.tryConsume(MAX_SNIPPET_CHARS)
+                    ? sliceLines(lines, symbol.getStartLine(), symbol.getEndLine(), MAX_SNIPPET_CHARS)
+                    : null;
+            symbolChunk.setSourceSnippet(snippet);
             symbolChunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":" + symbol.getStartLine() + ",\"endLine\":" + symbol.getEndLine() + "}");
             symbolChunk.setCreatedAt(now);
             chunkMapper.insert(symbolChunk);
         }
+    }
+
+    /**
+     * 根据已落库的符号切片建立轻量调用关系。
+     * <p>
+     * 关系只在一次完整索引结束前生成，失败时不会把半成品关系留给后续问答。
+     * 目标匹配依赖方法名和目录层级，属于保守的候选图；模型上下文仍会同时看到原始切片。
+     */
+    private void rebuildRelations(Long projectId) {
+        chunkMapper.deleteRelationsByProject(projectId);
+        int inserted = 0;
+        for (AiCodeRelationCandidate candidate : chunkMapper.findRelationCandidates(projectId)) {
+            if (candidate == null || candidate.getSourceChunkId() == null || candidate.getTargetChunkId() == null
+                    || candidate.getSourceChunkId().equals(candidate.getTargetChunkId())) {
+                continue;
+            }
+            chunkMapper.insertRelation(snowflakeIdGenerator.nextId(), projectId,
+                    candidate.getSourceChunkId(), candidate.getTargetChunkId(), candidate.getRelationType());
+            inserted++;
+        }
+        log.info("code graph relations rebuilt, projectId={}, relations={}", projectId, inserted);
     }
 
     /**
@@ -385,8 +446,40 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     }
 
     private void runGitClone(AiCodeProjectEntity project, Path workspace, Path isolatedHome) throws Exception {
-        runCommand(workspace.getParent(), isolatedHome, credentialOf(project), "git", "clone", "--depth", "1", "--branch",
-                project.getGitBranch(), project.getGitUrl(), workspace.toString());
+        GitCredential credential = credentialOf(project);
+        Exception last = null;
+        for (int attempt = 1; attempt <= GIT_CLONE_ATTEMPTS; attempt++) {
+            try {
+                runCommand(workspace.getParent(), isolatedHome, credential, "git", "clone", "--depth", "1", "--branch",
+                        project.getGitBranch(), project.getGitUrl(), workspace.toString());
+                return;
+            } catch (Exception e) {
+                last = e;
+                if (attempt >= GIT_CLONE_ATTEMPTS || !isRetryableGitError(e)) {
+                    throw e;
+                }
+                log.warn("Git 克隆遇到瞬时网络错误，将重试 ({}/{}): projectId={}, err={}",
+                        attempt, GIT_CLONE_ATTEMPTS - 1, project.getId(), e.getMessage());
+                // git 可能已经在工作区写入了半套 .git；重试前清空，避免第二次 clone 因目标非空失败。
+                deleteWorkspace(workspace);
+                Files.createDirectories(workspace);
+                Thread.sleep(1000L * attempt);
+            }
+        }
+        throw last == null ? new IOException("Git 克隆失败") : last;
+    }
+
+    private boolean isRetryableGitError(Exception error) {
+        String message = error == null || error.getMessage() == null
+                ? "" : error.getMessage().toLowerCase(Locale.ROOT);
+        return message.contains("connection timed out")
+                || message.contains("connection was reset")
+                || message.contains("connection refused")
+                || message.contains("failed to connect")
+                || message.contains("could not resolve host")
+                || message.contains("empty reply")
+                || message.contains("bad gateway")
+                || message.contains("502");
     }
 
     private String runGitCommand(Path directory, Path isolatedHome, String... args) throws Exception {
@@ -530,15 +623,19 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
                 .redirectErrorStream(true);
         applyIsolatedGitEnv(builder, isolatedHome, credential);
         Process process = builder.start();
-        boolean done = process.waitFor(120, TimeUnit.SECONDS);
+        boolean done = process.waitFor(GIT_COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         if (!done) {
             process.destroyForcibly();
+            process.waitFor(5, TimeUnit.SECONDS);
         }
         String output;
         try (InputStream input = process.getInputStream()) {
             output = new String(readAll(input), StandardCharsets.UTF_8);
         }
-        if (!done || process.exitValue() != 0) {
+        if (!done) {
+            throw new IOException("Git 命令执行超时（" + GIT_COMMAND_TIMEOUT_SECONDS + " 秒），已终止进程");
+        }
+        if (process.exitValue() != 0) {
             throw new IOException("Git 命令执行失败: " + truncate(output));
         }
         return output;
@@ -717,7 +814,11 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         Files.deleteIfExists(path);
     }
 
-    private static class IndexCounter { private int count; }
+    private static class IndexCounter {
+        private int processed;
+        private int indexed;
+        private int skipped;
+    }
 
     /** 单文件源码片段总额度：用完之后该文件剩余的符号切片不再落源码，避免超大文件把库撑爆 */
     private static class SnippetBudget {

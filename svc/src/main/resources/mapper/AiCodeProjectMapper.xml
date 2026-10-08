@@ -17,6 +17,9 @@
         <result column="document_count" property="documentCount"/>
         <result column="chunk_count" property="chunkCount"/>
         <result column="symbol_chunk_count" property="symbolChunkCount"/>
+        <result column="index_total_files" property="indexTotalFiles"/>
+        <result column="index_processed_files" property="indexProcessedFiles"/>
+        <result column="index_skipped_files" property="indexSkippedFiles"/>
         <result column="created_by" property="createdBy"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
@@ -33,11 +36,12 @@
                (SELECT COUNT(*) FROM ai_code_chunk c
                 JOIN ai_code_document d ON d.id = c.document_id
                 WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
+               p.index_total_files, p.index_processed_files, p.index_skipped_files,
                p.created_by, p.created_at, p.updated_at
         FROM ai_code_project p WHERE p.id = #{id}
     </select>
 
-    <select id="listByUser" resultMap="projectMap">
+    <sql id="userListQuery">
         SELECT p.id, p.name, p.git_url, p.git_branch, p.git_commit, p.credential_enc, p.credential_user, p.status,
                p.last_error, p.last_indexed_at, p.last_index_ms,
                round(extract(epoch from (now() - p.updated_at)) * 1000) AS elapsed_ms,
@@ -48,10 +52,25 @@
                (SELECT COUNT(*) FROM ai_code_chunk c
                 JOIN ai_code_document d ON d.id = c.document_id
                 WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
+               p.index_total_files, p.index_processed_files, p.index_skipped_files,
                p.created_by, p.created_at, p.updated_at
         FROM ai_code_project p
         WHERE p.created_by = #{userId}
-        ORDER BY p.updated_at DESC
+    </sql>
+
+    <select id="listByUser" resultMap="projectMap">
+        <include refid="userListQuery"/>
+        ORDER BY p.updated_at DESC, p.id DESC
+    </select>
+
+    <select id="pageByUser" resultMap="projectMap">
+        <include refid="userListQuery"/>
+        ORDER BY p.updated_at DESC, p.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="long">
+        SELECT COUNT(*) FROM ai_code_project WHERE created_by = #{userId}
     </select>
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiCodeProjectEntity">
@@ -77,6 +96,21 @@
     <update id="updateStatus">
         UPDATE ai_code_project
         SET status = #{status}, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="startIndex">
+        UPDATE ai_code_project
+        SET status = 'INDEXING', last_error = NULL,
+            index_total_files = #{totalFiles}, index_processed_files = 0,
+            index_skipped_files = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateIndexProgress">
+        UPDATE ai_code_project
+        SET index_processed_files = #{processedFiles},
+            index_skipped_files = #{skippedFiles}, updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
 

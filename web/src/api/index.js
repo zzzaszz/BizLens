@@ -30,8 +30,8 @@ export function aiCreateConversation(data) {
   return request({url: '/ai/chat/create', method: 'post', data})
 }
 
-export function aiConversations() {
-  return request({url: '/ai/chat/conversations', method: 'get'})
+export function aiConversations(params) {
+  return request({url: '/ai/chat/conversations', method: 'get', params})
 }
 
 export function aiCloseConversation(data) {
@@ -62,8 +62,8 @@ export function aiDeleteConversation(id) {
 }
 
 // ============ AI 角色 ==========
-export function aiAgentList() {
-  return request({url: '/ai/agent/list', method: 'get'})
+export function aiAgentList(params) {
+  return request({url: '/ai/agent/list', method: 'get', params})
 }
 
 export function aiAgentCreate(data) {
@@ -84,8 +84,8 @@ export function aiAgentModels(data) {
 }
 
 // ============ 代码项目 ==========
-export function codeProjectList() {
-  return request({url: '/ai/project/list', method: 'get'})
+export function codeProjectList(params) {
+  return request({url: '/ai/project/list', method: 'get', params})
 }
 
 export function codeProjectCreate(data) {

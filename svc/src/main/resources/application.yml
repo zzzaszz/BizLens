@@ -28,7 +28,6 @@ mybatis:
 ai:
   provider: deepseek
   deepseek:
-    api-key: ${DEEPSEEK_API_KEY:}
     base-url: https://api.deepseek.com
     # 角色未指定模型时的兜底模型。
     # 注意：deepseek-chat / deepseek-reasoner 两个别名已于 2026-07-24 下线，调用会直接报错，勿再使用。

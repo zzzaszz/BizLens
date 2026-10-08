@@ -12,15 +12,18 @@ import zzz.service.forum.domain.AiConversationEntity;
 import zzz.service.forum.domain.dto.AiCodeChunkHit;
 import zzz.service.forum.domain.dto.AiCreateConversationRequest;
 import zzz.service.forum.domain.dto.AiSendRequest;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.service.*;
 import zzz.service.forum.utils.BaseBusinessException;
 import zzz.service.forum.utils.CryptoService;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * AI 对话业务服务实现类
@@ -121,6 +124,10 @@ public class AiServiceImpl implements AiService {
     private AiSafetyGuard aiSafetyGuard;
     @Resource
     private AiCodeRetrievalService aiCodeRetrievalService;
+    @Resource
+    private zzz.service.forum.mapper.AiSecurityAuditMapper aiSecurityAuditMapper;
+    @Resource
+    private zzz.service.forum.utils.SnowflakeIdGenerator snowflakeIdGenerator;
 
     @Override
     public AiConversationEntity createConversation(Long userId, AiCreateConversationRequest request) {
@@ -145,6 +152,11 @@ public class AiServiceImpl implements AiService {
     @Override
     public List<AiConversationEntity> listConversations(Long userId) {
         return aiConversationService.listByUser(userId);
+    }
+
+    @Override
+    public PageResult<AiConversationEntity> pageConversations(Long userId, int page, int pageSize, Integer status) {
+        return aiConversationService.pageByUser(userId, page, pageSize, status);
     }
 
     @Override
@@ -186,11 +198,18 @@ public class AiServiceImpl implements AiService {
         String reply;
         try {
             AiResponse resp = aiProvider.chat(aiRequest);
-            reply = resp.getContent();
-            if (aiSafetyGuard.containsRestrictedOutput(reply)) {
+            reply = resp == null ? "" : resp.getContent();
+            boolean blocked = aiSafetyGuard.containsRestrictedOutput(reply);
+            if (blocked) {
                 reply = aiSafetyGuard.refusal();
             }
+            writeAudit(userId, projects, request.getMessage(), agent.getModel(),
+                    blocked ? "BLOCKED_OUTPUT" : "SUCCESS",
+                    blocked ? new String[]{"RESTRICTED_OUTPUT"} : new String[0], blocked,
+                    "{\"mode\":\"sync\"}");
         } catch (Exception e) {
+            writeAudit(userId, projects, request.getMessage(), agent.getModel(),
+                    "MODEL_ERROR", new String[]{"MODEL_CALL_FAILED"}, false, "{\"mode\":\"sync\"}");
             log.warn("AI 调用失败: {}", e.getMessage());
             throw new BaseBusinessException("AI 服务暂时不可用，请稍后再试");
         }
@@ -222,6 +241,7 @@ public class AiServiceImpl implements AiService {
 
             // 4. 流式调用：增量即时推送，累积的同时做安全拦截，完成后落库
             StringBuilder reply = new StringBuilder();
+            AtomicBoolean terminal = new AtomicBoolean(false);
             aiProvider.chatStream(aiRequest, new AiStreamListener() {
                 /** 命中安全拦截后置位，后续增量一律丢弃，不再推给客户端 */
                 private boolean blocked = false;
@@ -252,6 +272,11 @@ public class AiServiceImpl implements AiService {
 
                 @Override
                 public void onError(Throwable t) {
+                    if (!terminal.compareAndSet(false, true)) {
+                        return;
+                    }
+                    writeAudit(userId, projects, request.getMessage(), agent.getModel(),
+                            "STREAM_ERROR", new String[]{"MODEL_CALL_FAILED"}, false, "{\"mode\":\"stream\"}");
                     log.warn("AI 流式调用失败: {}", t.getMessage());
                     try {
                         emitter.send(sseEvent("error", t.getMessage() != null ? t.getMessage() : "AI 调用失败"));
@@ -262,15 +287,25 @@ public class AiServiceImpl implements AiService {
 
                 @Override
                 public void onDone() {
+                    if (!terminal.compareAndSet(false, true)) {
+                        return;
+                    }
                     try {
                         aiChatMessageService.saveAndCache(request.getConversationId(), "USER", String.valueOf(userId), request.getMessage());
                         // 落库用拒答文案而非模型原文：历史回看时也不该看到被拦截的内容
                         String safeReply = blocked ? aiSafetyGuard.refusal() : reply.toString();
                         aiChatMessageService.saveAndCache(request.getConversationId(), "AI", "ai", safeReply);
+                        writeAudit(userId, projects, request.getMessage(), agent.getModel(),
+                                blocked ? "STREAM_BLOCKED" : "STREAM_SUCCESS",
+                                blocked ? new String[]{"RESTRICTED_OUTPUT"} : new String[0], blocked,
+                                "{\"mode\":\"stream\"}");
                         // done 不再携带正文，正文已经由 delta 推完
                         emitter.send(sseEvent(EVENT_DONE, null));
                         emitter.complete();
                     } catch (Exception e) {
+                        writeAudit(userId, projects, request.getMessage(), agent.getModel(),
+                                "STREAM_PERSIST_ERROR", new String[]{"PERSISTENCE_FAILED"}, false,
+                                "{\"mode\":\"stream\"}");
                         log.warn("流式完成落库失败: {}", e.getMessage());
                         try {
                             emitter.completeWithError(e);
@@ -361,6 +396,8 @@ public class AiServiceImpl implements AiService {
             throw new BaseBusinessException("消息内容不能为空");
         }
         if (aiSafetyGuard.isPromptInjection(message)) {
+            writeAudit(userId, null, message, null, "BLOCKED_INPUT",
+                    new String[]{"PROMPT_INJECTION"}, true, "{\"mode\":\"precheck\"}");
             throw new BaseBusinessException(aiSafetyGuard.refusal());
         }
         if (message.length() > MAX_MESSAGE_LENGTH) {
@@ -418,21 +455,43 @@ public class AiServiceImpl implements AiService {
         String projectLabel = names.toString();
 
         // 知识库召回：把关联项目内相关源码片段喂给模型，让它能真正回答业务问题
+        List<AiChatMessageEntity> recentHistory = aiChatMessageService.loadHistoryCached(conv.getId(), CONTEXT_RECENT);
+        String retrievalQuestion = buildRetrievalQuestion(recentHistory, message);
         List<AiCodeChunkHit> hits = aiCodeRetrievalService.retrieve(
-                projectIds, message, agent.getModel(),
+                projectIds, retrievalQuestion, agent.getModel(),
                 aiRequest.getApiKey(), agent.getApibaseurl(), agent.getProvider());
         String context = aiCodeRetrievalService.buildContext(hits);
         messages.add(AiMessage.system(context != null
                 ? String.format(KNOWLEDGE_PREFIX, projectLabel) + context
                 : String.format(NO_KNOWLEDGE_HINT, projectLabel)));
 
-        for (AiChatMessageEntity h : aiChatMessageService.loadHistoryCached(conv.getId(), CONTEXT_RECENT)) {
+        for (AiChatMessageEntity h : recentHistory) {
             messages.add("AI".equalsIgnoreCase(h.getSendertype())
                     ? AiMessage.assistant(h.getContent())
                     : AiMessage.user(h.getContent()));
         }
         messages.add(AiMessage.user(message));
         return messages;
+    }
+
+    /**
+     * 文件级问题经常使用“这个 Controller/这个方法”指代上一轮提到的目标。
+     * 将最近的用户消息作为检索线索，但当前消息仍放在最后，避免旧问题主导召回。
+     */
+    private String buildRetrievalQuestion(List<AiChatMessageEntity> history, String current) {
+        StringBuilder result = new StringBuilder();
+        if (history != null) {
+            int start = Math.max(0, history.size() - 4);
+            for (int i = start; i < history.size(); i++) {
+                AiChatMessageEntity item = history.get(i);
+                if (item != null && "USER".equalsIgnoreCase(item.getSendertype())
+                        && item.getContent() != null && !item.getContent().trim().isEmpty()) {
+                    result.append(item.getContent()).append('\n');
+                }
+            }
+        }
+        result.append(current == null ? "" : current);
+        return result.toString();
     }
 
     /**
@@ -444,6 +503,43 @@ public class AiServiceImpl implements AiService {
         aiRequest.setBaseUrl(agent.getApibaseurl());
         aiRequest.setProvider(agent.getProvider());
         return aiRequest;
+    }
+
+    private void writeAudit(Long userId, List<AiCodeProjectEntity> projects, String question,
+                            String model, String responseStatus, String[] rules, boolean blocked,
+                            String retrievalMeta) {
+        try {
+            zzz.service.forum.domain.AiSecurityAuditEntity audit = new zzz.service.forum.domain.AiSecurityAuditEntity();
+            audit.setId(snowflakeIdGenerator.nextId());
+            audit.setUserId(userId);
+            audit.setProjectId(projects != null && projects.size() == 1 ? projects.get(0).getId() : null);
+            audit.setQuestion(truncateAuditQuestion(question));
+            audit.setRetrievalMeta(retrievalMeta == null ? "{}" : retrievalMeta);
+            audit.setModel(model);
+            audit.setResponseStatus(responseStatus);
+            audit.setTriggeredRules(jsonArray(rules));
+            audit.setBlocked(blocked);
+            audit.setCreatedAt(new Date());
+            aiSecurityAuditMapper.insert(audit);
+        } catch (Exception e) {
+            log.warn("AI 安全审计写入失败: {}", e.getMessage());
+        }
+    }
+
+    private String truncateAuditQuestion(String question) {
+        if (question == null) return "";
+        return question.length() <= MAX_MESSAGE_LENGTH ? question : question.substring(0, MAX_MESSAGE_LENGTH);
+    }
+
+    private String jsonArray(String[] values) {
+        if (values == null || values.length == 0) return "[]";
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) result.append(',');
+            result.append('"').append(values[i].replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append('"');
+        }
+        return result.append(']').toString();
     }
 
     /**

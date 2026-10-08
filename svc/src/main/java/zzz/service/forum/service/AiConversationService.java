@@ -1,6 +1,7 @@
 package zzz.service.forum.service;
 
 import zzz.service.forum.domain.AiConversationEntity;
+import zzz.service.forum.domain.dto.PageResult;
 
 import java.util.List;
 
@@ -12,6 +13,8 @@ public interface AiConversationService {
     AiConversationEntity getById(Long id);
 
     List<AiConversationEntity> listByUser(Long userId);
+
+    PageResult<AiConversationEntity> pageByUser(Long userId, int page, int pageSize, Integer status);
 
     AiConversationEntity create(Long userId, Long agentId, String title);
 

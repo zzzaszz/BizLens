@@ -32,6 +32,10 @@ export default { name: 'AiChat' }
         </div>
         <el-empty v-if="!visibleConversations.length" description="暂无会话" :image-size="48" />
       </div>
+      <div class="conv-pagination">
+        <el-pagination v-model:current-page="conversationPage" :page-size="CONVERSATION_PAGE_SIZE"
+          layout="prev, pager, next" :total="conversationTotal" @current-change="loadConversations" />
+      </div>
     </div>
 
     <div class="ai-main">
@@ -144,7 +148,7 @@ export default { name: 'AiChat' }
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Close, ChatDotRound } from '@element-plus/icons-vue'
@@ -167,6 +171,9 @@ const msgBox = ref(null)
 const inputText = ref('')
 const messages = ref([])
 const conversations = ref([])
+const conversationPage = ref(1)
+const conversationTotal = ref(0)
+const CONVERSATION_PAGE_SIZE = 20
 const agents = ref([])
 const current = ref(null)
 const sending = ref(false)
@@ -179,7 +186,7 @@ const scope = ref('open')
 /** 右键菜单：kind 决定菜单项（'message' 删单条 / 'conversation' 删整个会话） */
 const menu = ref({ show: false, x: 0, y: 0, kind: null, target: null })
 
-/** 侧栏展示的会话，按筛选条件过滤（列表本身已按 UpdatedAt 倒序） */
+/** 侧栏展示的会话；状态筛选已经下推到服务端，保留过滤只作为数据防护。 */
 const visibleConversations = computed(() => {
   if (scope.value === 'open') return conversations.value.filter(c => c.status === 1)
   if (scope.value === 'closed') return conversations.value.filter(c => c.status !== 1)
@@ -206,12 +213,23 @@ function scrollBottom() {
   nextTick(() => { if (msgBox.value) msgBox.value.scrollTop = msgBox.value.scrollHeight })
 }
 
-async function loadConversations() {
+async function loadConversations(page = conversationPage.value) {
+  conversationPage.value = page
   try {
-    const res = await aiConversations()
-    if (res.code === 200) conversations.value = res.data || []
+    const status = scope.value === 'open' ? 1 : (scope.value === 'closed' ? 0 : null)
+    const res = await aiConversations({ page, pageSize: CONVERSATION_PAGE_SIZE, status })
+    if (res.code === 200) {
+      const data = res.data || {}
+      conversations.value = data.records || []
+      conversationTotal.value = Number(data.total || 0)
+    }
   } catch { /* 忽略 */ }
 }
+
+watch(scope, async () => {
+  conversationPage.value = 1
+  await loadConversations(1)
+})
 
 async function loadAgents() {
   try {
@@ -543,6 +561,8 @@ onBeforeUnmount(() => {
 .scope-switch { margin: 0 12px 10px; width: calc(100% - 24px); }
 .scope-switch :deep(.el-radio-button__inner) { padding: 5px 8px; font-size: 12px; }
 .conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+.conv-pagination { flex-shrink: 0; padding: 8px 4px 10px; border-top: 1px solid var(--border-light); }
+.conv-pagination :deep(.el-pagination) { justify-content: center; }
 .conv-item {
   padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer;
   border-left: 2px solid transparent;

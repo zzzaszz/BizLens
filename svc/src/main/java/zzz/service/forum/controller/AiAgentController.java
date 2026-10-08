@@ -8,6 +8,7 @@ import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.dto.AiAgentRequest;
 import zzz.service.forum.domain.dto.AiModelListRequest;
 import zzz.service.forum.domain.dto.AiModelListResponse;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.domain.dto.R;
 import zzz.service.forum.service.AiAgentService;
 
@@ -30,9 +31,16 @@ public class AiAgentController {
 
     /** 角色列表（系统角色 + 我的角色），返回时脱敏 API Key */
     @GetMapping("/list")
-    public R<List<AiAgentEntity>> list() {
+    public R<?> list(@RequestParam(required = false) Integer page,
+                     @RequestParam(required = false) Integer pageSize) {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
+        if (page != null || pageSize != null) {
+            PageResult<AiAgentEntity> result = aiAgentService.pageForUser(userId,
+                    page == null ? 1 : page, pageSize == null ? 20 : pageSize);
+            result.getRecords().forEach(this::maskApiKey);
+            return R.ok(result);
+        }
         List<AiAgentEntity> agents = aiAgentService.listForUser(userId);
         if (agents == null) agents = new ArrayList<>();
         for (AiAgentEntity agent : agents) {

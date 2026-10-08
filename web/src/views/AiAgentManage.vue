@@ -50,6 +50,10 @@ export default { name: 'AiAgentManage' }
         </template>
       </el-table-column>
     </el-table>
+    <div class="pagination-bar">
+      <el-pagination v-model:current-page="agentPage" :page-size="AGENT_PAGE_SIZE"
+        layout="total, prev, pager, next" :total="agentTotal" @current-change="loadAll" />
+    </div>
 
     <!-- 创建 / 编辑角色弹窗；align-center 让弹窗垂直居中 -->
     <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" align-center :append-to-body="true">
@@ -181,6 +185,9 @@ const router = useRouter()
 const loading = ref(false)
 const agents = ref([])
 const projects = ref([])
+const agentPage = ref(1)
+const agentTotal = ref(0)
+const AGENT_PAGE_SIZE = 10
 const formVisible = ref(false)
 const saving = ref(false)
 const loadingModels = ref(false)
@@ -263,11 +270,18 @@ function projectStatusText(status) {
   return ({ PENDING: '待索引', QUEUED: '排队中', INDEXING: '索引中', READY: '已就绪', FAILED: '索引失败' })[status] || status || '未知'
 }
 
-async function loadAll() {
+async function loadAll(page = agentPage.value) {
+  agentPage.value = page
   loading.value = true
   try {
-    const [agentRes, projectRes] = await Promise.all([aiAgentList(), codeProjectList()])
-    if (agentRes.code === 200) agents.value = agentRes.data || []
+    const [agentRes, projectRes] = await Promise.all([
+      aiAgentList({ page, pageSize: AGENT_PAGE_SIZE }), codeProjectList()
+    ])
+    if (agentRes.code === 200) {
+      const data = agentRes.data || {}
+      agents.value = data.records || []
+      agentTotal.value = Number(data.total || 0)
+    }
     if (projectRes.code === 200) projects.value = projectRes.data || []
   } catch {
     /* 错误提示由请求拦截器统一处理 */
@@ -445,9 +459,7 @@ async function startChat(a) {
   try {
     // 会话列表已按 UpdatedAt 倒序，取第一条匹配的就是该角色最近一次会话；
     // 只认未关闭的（status=1），已关闭的会话应该新建一条而不是把旧的翻出来
-    const convRes = await aiConversations()
-    const list = convRes.code === 200 ? (convRes.data || []) : []
-    let conversation = list.find(c => c.agentid === a.id && c.status === 1)
+    let conversation = await findOpenConversation(a.id)
     if (!conversation) {
       const res = await aiCreateConversation({ agentId: a.id, title: a.name })
       if (res.code !== 200) {
@@ -462,6 +474,26 @@ async function startChat(a) {
   } finally {
     startingId.value = null
   }
+}
+
+/**
+ * 会话列表是服务端分页的，不能只查第一页，否则角色有超过 100 条历史时会重复创建空会话。
+ * 这里只取满足条件的第一条，最多按页扫描一次当前用户的全部进行中会话。
+ */
+async function findOpenConversation(agentId) {
+  const pageSize = 100
+  let page = 1
+  let total = 0
+  do {
+    const res = await aiConversations({ page, pageSize, status: 1 })
+    if (res.code !== 200) return null
+    const data = res.data || {}
+    const found = (data.records || []).find(c => String(c.agentid) === String(agentId) && c.status === 1)
+    if (found) return found
+    total = Number(data.total || 0)
+    page += 1
+  } while ((page - 1) * pageSize < total)
+  return null
 }
 
 onMounted(async () => {
@@ -482,6 +514,7 @@ onMounted(async () => {
 
 <style scoped>
 .agent-manage { height: 100%; display: flex; flex-direction: column; }
+.pagination-bar { display: flex; justify-content: flex-end; padding: 14px 0 0; }
 
 .page-head {
   display: flex; align-items: flex-start; justify-content: space-between;

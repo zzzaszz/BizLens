@@ -44,6 +44,9 @@
       <el-table-column label="状态" width="270">
         <template #default="{ row }">
           <el-tag :type="statusTypeOf(row)" size="small">{{ statusText(row) }}</el-tag>
+          <el-progress v-if="indexProgress(row) != null" :percentage="indexProgress(row)"
+            :status="row.status === 'FAILED' ? 'exception' : (row.status === 'READY' ? 'success' : undefined)"
+            :stroke-width="5" class="index-progress" />
           <!-- 进度/时间：索引中显示已用多久与预计，完成显示完成时间，中断显示中断时间 -->
           <p v-if="statusTimeText(row)" class="status-time">{{ statusTimeText(row) }}</p>
           <!-- 索引失败/中断要能看到原因，否则只有一个标签没法排查 -->
@@ -83,6 +86,10 @@
         </template>
       </el-table-column>
     </el-table>
+    <div class="pagination-bar">
+      <el-pagination v-model:current-page="projectPage" :page-size="PROJECT_PAGE_SIZE"
+        layout="total, prev, pager, next" :total="projectTotal" @current-change="loadProjects" />
+    </div>
 
     <el-dialog v-model="visible" :title="form.id ? '编辑项目' : '新增项目'" width="520px" align-center>
       <el-form :model="form" label-width="90px">
@@ -145,6 +152,9 @@ import {
 const router = useRouter()
 const projects = ref([])
 const agents = ref([])
+const projectPage = ref(1)
+const projectTotal = ref(0)
+const PROJECT_PAGE_SIZE = 10
 const loading = ref(false)
 const saving = ref(false)
 const indexingId = ref(null)
@@ -272,6 +282,13 @@ function statusTimeText(row) {
   return ''
 }
 
+function indexProgress(row) {
+  if (!row || row.indexTotalFiles == null || Number(row.indexTotalFiles) <= 0) return null
+  const total = Number(row.indexTotalFiles)
+  const processed = Math.min(Number(row.indexProcessedFiles || 0), total)
+  return Math.round(processed * 100 / total)
+}
+
 /** 中断的索引按"信息态"显示，不要用和"进行中"一样的黄色，否则看不出来它已经死了 */
 function statusTypeOf(row) {
   if (isIndexInterrupted(row)) return 'info'
@@ -340,7 +357,7 @@ function syncTicker() {
 function syncPolling() {
   const busy = projects.value.some(p => isIndexRunning(p))
   if (busy && !pollTimer) {
-    pollTimer = setInterval(() => loadProjects(true), POLL_INTERVAL)
+    pollTimer = setInterval(() => loadProjects(projectPage.value, true), POLL_INTERVAL)
   } else if (!busy && pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -348,11 +365,19 @@ function syncPolling() {
 }
 
 /** @param quiet 轮询时用：不动 loading，避免每次刷新整表闪一下 */
-async function loadProjects(quiet = false) {
+async function loadProjects(page = projectPage.value, quiet = false) {
+  if (typeof page !== 'number') page = projectPage.value
+  projectPage.value = page
   if (!quiet) loading.value = true
   try {
-    const [projectRes, agentRes] = await Promise.all([codeProjectList(), aiAgentList()])
-    if (projectRes.code === 200) projects.value = projectRes.data || []
+    const [projectRes, agentRes] = await Promise.all([
+      codeProjectList({ page, pageSize: PROJECT_PAGE_SIZE }), aiAgentList({ page: 1, pageSize: 100 })
+    ])
+    if (projectRes.code === 200) {
+      const data = projectRes.data || {}
+      projects.value = data.records || []
+      projectTotal.value = Number(data.total || 0)
+    }
     if (agentRes.code === 200) agents.value = agentRes.data || []
     // 记下这次拉取的时刻：服务端 elapsedMs 是"拉取那一刻"的值，之后由本地时钟往上叠加
     lastFetchedAt.value = Date.now()
@@ -467,6 +492,7 @@ onBeforeUnmount(() => {
 /* 与「AI 角色」页保持同一套布局：占满内容区、不加 max-width，
    否则两页宽度不一致，且表格会被挤到需要横向滚动 */
 .projects-page { height: 100%; display: flex; flex-direction: column; }
+.pagination-bar { display: flex; justify-content: flex-end; padding: 14px 0 0; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
 .page-head h2 { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 .page-head p { font-size: 13px; color: var(--text-secondary); margin: 0; }
@@ -477,6 +503,7 @@ onBeforeUnmount(() => {
 
 /* 索引进度/时间：小字一行 */
 .status-time { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.index-progress { width: 150px; margin-top: 5px; }
 
 /* 索引失败原因：列表里一行省略，悬停看完整报错 */
 .err-line {

@@ -5,6 +5,7 @@ import zzz.service.forum.domain.AiChatMessageEntity;
 import zzz.service.forum.domain.AiConversationEntity;
 import zzz.service.forum.domain.dto.AiCreateConversationRequest;
 import zzz.service.forum.domain.dto.AiSendRequest;
+import zzz.service.forum.domain.dto.PageResult;
 
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,8 @@ public interface AiService {
 
     /** 我的会话列表 */
     List<AiConversationEntity> listConversations(Long userId);
+
+    PageResult<AiConversationEntity> pageConversations(Long userId, int page, int pageSize, Integer status);
 
     /** 关闭会话 */
     boolean closeConversation(Long userId, Long conversationId);

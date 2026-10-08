@@ -35,6 +35,12 @@ public class AiCodeProjectEntity implements Serializable {
     private Integer documentCount;
     private Integer chunkCount;
     private Integer symbolChunkCount;
+    /** 本次索引扫描到的可索引文件总数。 */
+    private Integer indexTotalFiles;
+    /** 本次索引已处理的文件数。 */
+    private Integer indexProcessedFiles;
+    /** 因超过大小、数量限制或单文件异常而跳过的文件数。 */
+    private Integer indexSkippedFiles;
     private Long createdBy;
     private Date createdAt;
     private Date updatedAt;

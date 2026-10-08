@@ -13,7 +13,9 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,6 +39,9 @@ public class AiCodeRetrievalService {
     private static final int MAX_SNIPPET_IN_PROMPT = 1500;
     /** 注入 prompt 的总字符预算 */
     private static final int MAX_TOTAL_CHARS = 8000;
+    private static final int MAX_FILE_RESULTS = 8;
+    private static final int MAX_CHAIN_DEPTH = 4;
+    private static final int MAX_CHAIN_HITS = 16;
 
     /** Java 的 class/interface extends 声明；只从 FILE 切片中解析，避免命中方法正文里的普通文本。 */
     private static final Pattern JAVA_EXTENDS = Pattern.compile(
@@ -67,12 +72,52 @@ public class AiCodeRetrievalService {
         }
         try {
             List<String> keywords = queryRewriter.rewrite(question, model, apiKey, baseUrl, provider);
+            if (isFileOverviewQuestion(question)) {
+                keywords = mergeExplicitKeywords(question, keywords);
+            }
             if (keywords.isEmpty()) {
                 log.info("未得到可用检索词，跳过知识库召回: projectIds={}", projectIds);
                 return Collections.emptyList();
             }
+            if (isFileOverviewQuestion(question)) {
+                List<AiCodeChunkHit> complete = retrieveCompleteFiles(projectIds, keywords);
+                if (!complete.isEmpty()) {
+                    log.info("文件级完整检索完成: projectIds={}, files={}, symbols={}",
+                            projectIds, countFiles(complete), complete.size());
+                    return complete;
+                }
+            }
             List<AiCodeChunkHit> hits = chunkMapper.searchByKeywords(projectIds, keywords, MAX_HITS);
             hits = expandOneHopInheritance(hits, keywords);
+            if (isCallChainQuestion(question) && hits != null && !hits.isEmpty()) {
+                List<Long> seeds = new ArrayList<>();
+                List<Long> documentIds = new ArrayList<>();
+                for (AiCodeChunkHit hit : hits) {
+                    if (hit.getChunkId() != null && !"FILE".equalsIgnoreCase(hit.getChunkType())) {
+                        seeds.add(hit.getChunkId());
+                    }
+                    if ("FILE".equalsIgnoreCase(hit.getChunkType()) && hit.getDocumentId() != null) {
+                        documentIds.add(hit.getDocumentId());
+                    }
+                }
+                // 文件命中通常比方法名命中更稳定；把目标文件全部方法纳入链路种子，
+                // 否则“Controller 调用链”可能只拿到 FILE 节点而没有可追踪的起点。
+                if (!documentIds.isEmpty()) {
+                    List<AiCodeChunkHit> symbols = chunkMapper.listSymbolsByDocuments(documentIds);
+                    for (AiCodeChunkHit symbol : symbols) {
+                        if (symbol.getChunkId() != null && !"TABLE".equalsIgnoreCase(symbol.getChunkType())) {
+                            seeds.add(symbol.getChunkId());
+                        }
+                    }
+                }
+                seeds = uniqueIds(seeds);
+                if (!seeds.isEmpty()) {
+                    List<AiCodeChunkHit> chain = chunkMapper.findCallChain(seeds, MAX_CHAIN_DEPTH, MAX_CHAIN_HITS);
+                    if (chain != null) {
+                        hits = mergeUnique(hits, chain, MAX_CHAIN_HITS);
+                    }
+                }
+            }
             log.info("知识库召回完成: projectIds={}, keywords={}, hits={}",
                     projectIds, keywords.size(), hits == null ? 0 : hits.size());
             return hits == null ? Collections.emptyList() : hits;
@@ -81,6 +126,95 @@ public class AiCodeRetrievalService {
             log.warn("知识库召回失败，本轮按无知识库处理: projectIds={}, err={}", projectIds, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private List<AiCodeChunkHit> retrieveCompleteFiles(List<Long> projectIds, List<String> keywords) {
+        List<AiCodeChunkHit> files = chunkMapper.searchFiles(projectIds, keywords, MAX_FILE_RESULTS);
+        if (files == null || files.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> documentIds = new ArrayList<>();
+        for (AiCodeChunkHit file : files) {
+            if (file.getDocumentId() != null) {
+                documentIds.add(file.getDocumentId());
+            }
+        }
+        List<AiCodeChunkHit> symbols = documentIds.isEmpty()
+                ? Collections.<AiCodeChunkHit>emptyList() : chunkMapper.listSymbolsByDocuments(documentIds);
+        Map<Long, AiCodeChunkHit> fileByDocument = new LinkedHashMap<>();
+        for (AiCodeChunkHit file : files) {
+            file.setCompleteFile(true);
+            fileByDocument.put(file.getDocumentId(), file);
+        }
+        List<AiCodeChunkHit> result = new ArrayList<>();
+        result.addAll(files);
+        for (AiCodeChunkHit symbol : symbols) {
+            AiCodeChunkHit file = fileByDocument.get(symbol.getDocumentId());
+            if (file != null) {
+                symbol.setCompleteFile(true);
+                result.add(symbol);
+            }
+        }
+        return result;
+    }
+
+    private List<String> mergeExplicitKeywords(String question, List<String> original) {
+        Set<String> values = new LinkedHashSet<>();
+        if (original != null) values.addAll(original);
+        Matcher matcher = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$./-]{2,}").matcher(question);
+        while (matcher.find() && values.size() < 16) {
+            String value = matcher.group();
+            if (!isCommonFileWord(value)) values.add(value);
+        }
+        return new ArrayList<>(values);
+    }
+
+    private boolean isCommonFileWord(String value) {
+        String lower = value.toLowerCase(Locale.ROOT);
+        return "controller".equals(lower) || "service".equals(lower) || "mapper".equals(lower)
+                || "file".equals(lower) || "method".equals(lower) || "methods".equals(lower)
+                || "api".equals(lower) || "apis".equals(lower);
+    }
+
+    private List<Long> uniqueIds(List<Long> ids) {
+        return new ArrayList<>(new LinkedHashSet<>(ids));
+    }
+
+    private int countFiles(List<AiCodeChunkHit> hits) {
+        int count = 0;
+        for (AiCodeChunkHit hit : hits) {
+            if (hit != null && "FILE".equalsIgnoreCase(hit.getChunkType())) count++;
+        }
+        return count;
+    }
+
+    private boolean isFileOverviewQuestion(String question) {
+        String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
+        return q.contains("全部接口") || q.contains("所有接口") || q.contains("全部方法")
+                || q.contains("所有方法") || q.contains("有哪些接口") || q.contains("有哪些方法")
+                || q.contains("列出") && (q.contains("controller") || q.contains("文件"))
+                || q.contains("list all") || q.contains("all methods") || q.contains("all apis");
+    }
+
+    private boolean isCallChainQuestion(String question) {
+        String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
+        return q.contains("调用链") || q.contains("调用关系") || q.contains("怎么调用")
+                || q.contains("向下追踪") || q.contains("call chain") || q.contains("call graph")
+                || q.contains("controller") && q.contains("mapper");
+    }
+
+    private List<AiCodeChunkHit> mergeUnique(List<AiCodeChunkHit> first,
+                                             List<AiCodeChunkHit> second, int limit) {
+        List<AiCodeChunkHit> merged = new ArrayList<>();
+        Set<String> keys = new HashSet<>();
+        for (AiCodeChunkHit hit : first) {
+            if (hit != null && keys.add(hitKey(hit))) merged.add(hit);
+        }
+        for (AiCodeChunkHit hit : second) {
+            if (hit != null && keys.add(hitKey(hit))) merged.add(hit);
+            if (merged.size() >= limit) break;
+        }
+        return merged;
     }
 
     /**
@@ -201,7 +335,22 @@ public class AiCodeRetrievalService {
             return null;
         }
         StringBuilder context = new StringBuilder(1024);
+        Set<Long> completeDocuments = new HashSet<>();
+        StringBuilder completeFileIndex = new StringBuilder();
+        boolean sourceBudgetNoticeAdded = false;
         for (AiCodeChunkHit hit : hits) {
+            if (hit != null && hit.isCompleteFile() && "FILE".equalsIgnoreCase(hit.getChunkType())
+                    && hit.getDocumentId() != null && completeDocuments.add(hit.getDocumentId())) {
+                context.append("\n--- 完整文件目录 ").append(hit.getPath()).append(" ---\n");
+                context.append("文件范围：第 ").append(hit.getStartLine()).append('-').append(hit.getEndLine()).append(" 行\n");
+                continue;
+            }
+            if (hit.isCompleteFile() && !"FILE".equalsIgnoreCase(hit.getChunkType())
+                    && hit.getSymbolName() != null) {
+                completeFileIndex.append("- ").append(hit.getPath()).append(" :: ")
+                        .append(hit.getChunkType()).append(' ').append(hit.getSymbolName())
+                        .append("（第 ").append(hit.getStartLine()).append('-').append(hit.getEndLine()).append(" 行）\n");
+            }
             String snippet = hit.getSourceSnippet();
             if (snippet == null || snippet.trim().isEmpty()) {
                 continue;
@@ -210,8 +359,11 @@ public class AiCodeRetrievalService {
                 snippet = snippet.substring(0, MAX_SNIPPET_IN_PROMPT) + "\n...(已截断)";
             }
             if (context.length() + snippet.length() > MAX_TOTAL_CHARS) {
-                context.append("\n（上下文已达长度上限，其余片段省略）\n");
-                break;
+                if (!sourceBudgetNoticeAdded) {
+                    context.append("\n（上下文已达长度上限，源码片段省略；完整文件目录仍保留）\n");
+                    sourceBudgetNoticeAdded = true;
+                }
+                continue;
             }
             context.append("\n--- ").append(hit.getPath());
             if (hit.getSymbolName() != null && !hit.getSymbolName().isEmpty()) {
@@ -220,10 +372,18 @@ public class AiCodeRetrievalService {
             if (hit.isInherited()) {
                 context.append("（一跳继承扩展）");
             }
+            if (hit.getRelationDepth() != null) {
+                context.append("（调用链第 ").append(hit.getRelationDepth()).append(" 层");
+                if (hit.getRelationType() != null) context.append(' ').append(hit.getRelationType());
+                context.append('）');
+            }
             if (hit.getStartLine() != null && hit.getStartLine() > 0) {
                 context.append(" 第 ").append(hit.getStartLine()).append('-').append(hit.getEndLine()).append(" 行");
             }
             context.append(" ---\n").append(snippet).append('\n');
+        }
+        if (!completeDocuments.isEmpty() && completeFileIndex.length() > 0) {
+            context.append("\n完整文件中的全部已识别接口/方法/操作：\n").append(completeFileIndex);
         }
         return context.length() == 0 ? null : context.toString();
     }

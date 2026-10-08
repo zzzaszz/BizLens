@@ -46,9 +46,15 @@ public class AiChatController {
 
     /** 我的会话列表 */
     @GetMapping("/conversations")
-    public R<List<AiConversationEntity>> conversations() {
+    public R<?> conversations(@RequestParam(required = false) Integer page,
+                              @RequestParam(required = false) Integer pageSize,
+                              @RequestParam(required = false) Integer status) {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
+        if (page != null || pageSize != null) {
+            return R.ok(aiService.pageConversations(userId,
+                    page == null ? 1 : page, pageSize == null ? 20 : pageSize, status));
+        }
         return R.ok(aiService.listConversations(userId));
     }
 

@@ -29,15 +29,13 @@ import java.util.Map;
 /**
  * DeepSeek Provider：OpenAI 兼容格式，支持一次性返回与 SSE 流式。
  * <p>
- * api-key / base-url / model 均来自配置，密钥只存后端环境变量，不写死在代码里。
+ * base-url / model 来自配置；API Key 必须由业务层按角色传入，不使用服务级密钥兜底。
  */
 @Service
 public class DeepSeekProvider implements AiProvider {
 
     private static final Logger log = LoggerFactory.getLogger(DeepSeekProvider.class);
 
-    @Value("${ai.deepseek.api-key:}")
-    private String apiKey;
     @Value("${ai.deepseek.base-url:https://api.deepseek.com}")
     private String baseUrl;
     @Value("${ai.deepseek.model:deepseek-flash}")
@@ -58,7 +56,7 @@ public class DeepSeekProvider implements AiProvider {
             body.put("max_tokens", request.getMaxTokens());
         }
 
-        // 2. 鉴权头：角色自带 Key 优先，否则系统默认 Key
+        // 2. 鉴权头：只使用角色自带 Key，避免新增调用方绕过角色权限边界。
         String useKey = resolveKey(request);
         String useBaseUrl = resolveBaseUrl(request);
 
@@ -236,7 +234,7 @@ public class DeepSeekProvider implements AiProvider {
     }
 
     private String resolveKey(AiRequest request) {
-        return (request.getApiKey() != null && !request.getApiKey().isEmpty()) ? request.getApiKey() : apiKey;
+        return request.getApiKey();
     }
 
     private String resolveBaseUrl(AiRequest request) {

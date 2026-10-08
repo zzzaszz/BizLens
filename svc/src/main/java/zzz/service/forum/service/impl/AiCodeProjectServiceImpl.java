@@ -3,6 +3,7 @@ package zzz.service.forum.service.impl;
 import org.springframework.stereotype.Service;
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiCodeProjectRequest;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.mapper.AiCodeProjectMapper;
 import zzz.service.forum.service.AiCodeProjectService;
 import zzz.service.forum.service.AiCodeIndexService;
@@ -42,6 +43,15 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
     @Override
     public List<AiCodeProjectEntity> listByUser(Long userId) {
         return projectMapper.listByUser(userId);
+    }
+
+    @Override
+    public PageResult<AiCodeProjectEntity> pageByUser(Long userId, int page, int pageSize) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(pageSize, 1), 100);
+        long offset = (long) (safePage - 1) * safeSize;
+        return new PageResult<>(projectMapper.pageByUser(userId, offset, safeSize),
+                projectMapper.countByUser(userId), safePage, safeSize);
     }
 
     @Override

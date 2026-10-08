@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import zzz.service.forum.context.UserContext;
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiCodeProjectRequest;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.domain.dto.R;
 import zzz.service.forum.service.AiCodeProjectService;
 
@@ -24,9 +25,16 @@ public class AiCodeProjectController {
     private AiCodeProjectService projectService;
 
     @GetMapping("/list")
-    public R<List<AiCodeProjectEntity>> list() {
+    public R<?> list(@RequestParam(required = false) Integer page,
+                     @RequestParam(required = false) Integer pageSize) {
         Long userId = UserContext.getUserId();
         if (userId == null) return R.fail(401, "请先登录");
+        if (page != null || pageSize != null) {
+            PageResult<AiCodeProjectEntity> result = projectService.pageByUser(userId,
+                    page == null ? 1 : page, pageSize == null ? 20 : pageSize);
+            result.getRecords().forEach(this::maskCredential);
+            return R.ok(result);
+        }
         List<AiCodeProjectEntity> projects = projectService.listByUser(userId);
         for (AiCodeProjectEntity project : projects) {
             maskCredential(project);

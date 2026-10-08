@@ -2,6 +2,7 @@ package zzz.service.forum.service.impl;
 
 import org.springframework.stereotype.Service;
 import zzz.service.forum.domain.AiConversationEntity;
+import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.mapper.AiConversationMapper;
 import zzz.service.forum.service.AiConversationService;
 import zzz.service.forum.utils.SnowflakeIdGenerator;
@@ -29,6 +30,16 @@ public class AiConversationServiceImpl implements AiConversationService {
     @Override
     public List<AiConversationEntity> listByUser(Long userId) {
         return aiConversationMapper.listByUser(userId);
+    }
+
+    @Override
+    public PageResult<AiConversationEntity> pageByUser(Long userId, int page, int pageSize, Integer status) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(pageSize, 1), 100);
+        long offset = (long) (safePage - 1) * safeSize;
+        Integer safeStatus = status != null && (status == 0 || status == 1) ? status : null;
+        return new PageResult<>(aiConversationMapper.pageByUser(userId, offset, safeSize, safeStatus),
+                aiConversationMapper.countByUser(userId, safeStatus), safePage, safeSize);
     }
 
     @Override

@@ -48,7 +48,19 @@
         from "AiAgent"
         where "Enabled" = 1
           and "UserId" = #{userId}
-        order by "CreatedAt" desc
+        order by "CreatedAt" desc, "Id" desc
+    </select>
+
+    <select id="pageForUser" resultMap="AiAgentMap">
+        select <include refid="columns"/>
+        from "AiAgent"
+        where "Enabled" = 1 and "UserId" = #{userId}
+        order by "CreatedAt" desc, "Id" desc
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countForUser" resultType="long">
+        select count(*) from "AiAgent" where "Enabled" = 1 and "UserId" = #{userId}
     </select>
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiAgentEntity">

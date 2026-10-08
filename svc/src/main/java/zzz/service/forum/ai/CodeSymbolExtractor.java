@@ -28,6 +28,8 @@ public class CodeSymbolExtractor {
             "(?m)^[ \\t]*(?:export\\s+)?(?:async\\s+)?function\\s+(\\w+)\\s*\\(");
     private static final Pattern JS_ARROW = Pattern.compile(
             "(?m)^[ \\t]*(?:export\\s+)?(?:const|let)\\s+(\\w+)\\s*=\\s*(?:async\\s*)?(?:\\([^)]*\\)|\\w+)\\s*=>");
+    private static final Pattern SQL_TABLE = Pattern.compile(
+            "(?i)\\b(?:from|join|update|into|table)\\s+([A-Za-z_][\\w$]*(?:\\.[A-Za-z_][\\w$]*)?)");
 
     public List<Symbol> extract(String language, String source) {
         List<Symbol> symbols = new ArrayList<>();
@@ -37,11 +39,32 @@ public class CodeSymbolExtractor {
             collectMethods(symbols, JAVA_METHOD, source, lines, "METHOD", "方法");
         } else if ("xml".equals(language)) {
             collectXmlOperations(symbols, source);
+            collectSqlTables(symbols, source);
         } else if ("js".equals(language) || "ts".equals(language) || "vue".equals(language)) {
             collectNamed(symbols, JS_FUNCTION, source, "FUNCTION", "前端函数");
             collectNamed(symbols, JS_ARROW, source, "FUNCTION", "前端函数");
+        } else if ("sql".equals(language)) {
+            collectSqlTables(symbols, source);
         }
         return symbols;
+    }
+
+    private void collectSqlTables(List<Symbol> target, String source) {
+        Matcher matcher = SQL_TABLE.matcher(source);
+        while (matcher.find()) {
+            int line = lineOf(source, matcher.start());
+            String table = matcher.group(1);
+            boolean exists = false;
+            for (Symbol symbol : target) {
+                if (symbol.getName().equalsIgnoreCase(table)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                target.add(new Symbol("TABLE", table, line, line, "SQL 表 " + table));
+            }
+        }
     }
 
     private void collectMethods(List<Symbol> target, Pattern pattern, String source, String[] lines,
@@ -92,10 +115,13 @@ public class CodeSymbolExtractor {
     private void collectXmlOperations(List<Symbol> target, String source) {
         Matcher matcher = XML_OPERATION.matcher(source);
         while (matcher.find()) {
-            int line = lineOf(source, matcher.start());
+            int startLine = lineOf(source, matcher.start());
             String operation = matcher.group(1);
             String name = matcher.group(2);
-            target.add(new Symbol("MAPPER", name, line, line, "Mapper " + operation + " " + name));
+            String closingTag = "</" + operation + ">";
+            int closingOffset = source.indexOf(closingTag, matcher.end());
+            int endLine = closingOffset >= 0 ? lineOf(source, closingOffset) : startLine;
+            target.add(new Symbol("MAPPER", name, startLine, endLine, "Mapper " + operation + " " + name));
         }
     }
 
