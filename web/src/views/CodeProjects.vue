@@ -205,14 +205,14 @@ const nowTick = ref(Date.now())
 const lastFetchedAt = ref(Date.now())
 
 /**
- * 状态距今多少秒。
+ * 心跳距今多少秒，只用于判断索引任务是否仍存活。
  * <p>
  * 运行状态优先使用服务端按独立心跳字段计算的 heartbeatElapsedMs，
  * 这里只叠加"拉取之后又过了多久"。普通 elapsedMs 只作为旧数据库结构的降级：
  * updated_at 是数据库时钟写的，浏览器是客户端时钟，两者不一致时（本机实测差 13 秒）
  * 会出现"刚开始就显示已用 13 秒"。
  */
-function secondsSinceUpdate(row) {
+function secondsSinceHeartbeat(row) {
   const baseMs = row.heartbeatElapsedMs != null ? row.heartbeatElapsedMs : row.elapsedMs
   if (baseMs == null) {
     // 后端还没升级、没返回 elapsedMs 时的降级：退回用本地时钟算。
@@ -224,10 +224,24 @@ function secondsSinceUpdate(row) {
   return Number(baseMs) / 1000 + sinceFetch
 }
 
+/**
+ * 当前项目本轮索引已运行多久。它读取 index_started_at 计算出的 indexElapsedMs，
+ * 不使用 heartbeatElapsedMs，否则每次心跳刷新都会让显示用时重新从 0 开始。
+ */
+function secondsSinceIndexStart(row) {
+  const baseMs = row.indexElapsedMs != null ? row.indexElapsedMs : row.elapsedMs
+  if (baseMs == null) {
+    if (!row.updatedAt) return Infinity
+    return (nowTick.value - new Date(row.updatedAt.replace(' ', 'T')).getTime()) / 1000
+  }
+  const sinceFetch = (nowTick.value - lastFetchedAt.value) / 1000
+  return Number(baseMs) / 1000 + sinceFetch
+}
+
 /** 索引真的在跑：状态是排队/索引中，且最近还有心跳 */
 function isIndexRunning(row) {
   if (row.status !== 'QUEUED' && row.status !== 'INDEXING') return false
-  return secondsSinceUpdate(row) < HEARTBEAT_GRACE_SECONDS
+  return secondsSinceHeartbeat(row) < HEARTBEAT_GRACE_SECONDS
 }
 
 /**
@@ -236,7 +250,7 @@ function isIndexRunning(row) {
  */
 function isIndexInterrupted(row) {
   if (row.status !== 'QUEUED' && row.status !== 'INDEXING') return false
-  return secondsSinceUpdate(row) >= HEARTBEAT_GRACE_SECONDS
+  return secondsSinceHeartbeat(row) >= HEARTBEAT_GRACE_SECONDS
 }
 
 function statusText(row) {
@@ -267,7 +281,7 @@ function statusTimeText(row) {
     return `中断于 ${fmtDateTime(row.updatedAt)}，可重新索引`
   }
   if (isIndexRunning(row)) {
-    const elapsed = secondsSinceUpdate(row)
+    const elapsed = secondsSinceIndexStart(row)
     const lastMs = Number(row.lastIndexMs || 0)
     if (!lastMs) {
       return `已用 ${fmtDuration(elapsed)}`

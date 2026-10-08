@@ -58,6 +58,7 @@ docs/    项目开发文档与开发日志
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-projectid.sql      # AiAgent.ProjectId
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-sourcesnippet.sql  # ai_code_chunk.source_snippet
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-indexerror.sql     # ai_code_project.last_error
+   psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20261008-index-started-at.sql # 每个项目独立索引开始时间
    ```
 
    可选增强（数据库允许安装扩展时执行；失败会输出 NOTICE，不影响关键词召回）：
@@ -230,7 +231,7 @@ docs/    项目开发文档与开发日志
 2. **关键词召回加速依赖可选 `pg_trgm`**。已提供 `migration-20261008-trgm-indexes.sql`，但数据库不允许安装扩展时仍会回到普通 ILIKE 查询；数据量上万后建议在允许扩展的环境执行该迁移。
 3. **索引上限已可配置**：默认 `AI_INDEX_MAX_FILES=2000`、`AI_INDEX_MAX_FILE_BYTES=2097152`，超出的文件仍会跳过并统计到索引进度；大仓库可按部署容量调高，超大仓库仍建议拆分项目或分阶段索引。
 4. **索引进度仍是文件级进度**。当前按可索引文件扫描结果显示已处理/总数百分比，并显示正在处理的文件路径；单文件内部解析仍没有更细粒度进度。
-5. **索引中断的判定依赖独立心跳**（30 秒一次，超过 180 秒无心跳即视为进程已死）。心跳字段已与普通更新时间分离，单文件解析较慢时不会因为没有进度写入而误判；若数据库长时间不可写，任务仍可能被判定为中断。
+5. **索引中断的判定依赖独立心跳**（30 秒一次，超过 180 秒无心跳即视为进程已死）。心跳字段已与普通更新时间分离；项目本轮用时另由 `index_started_at` 计算，不会因心跳刷新而重置。若数据库长时间不可写，任务仍可能被判定为中断。
 6. **调用链关系属于候选图**。当前关系通过符号名与源码引用推导，适合辅助检索，
     仍可能因同名方法、反射、动态 SQL 或字符串拼接产生误连；更深层继承、多接口实现和 Kotlin
     复杂继承语法也尚未纳入图谱。已修的切片缺陷（切片丢注解、文件头过短、按长度升序排序、
@@ -265,7 +266,7 @@ docs/    项目开发文档与开发日志
 
 **工程基础**
 
-10. 已补前端 Markdown 单测和后端符号提取、敏感扫描、向量工具单测；本轮 `mvn -pl svc -am test` 通过（13 tests），`pnpm run test` 通过（2 tests），`pnpm run build` 通过。数据库 Mapper、知识库索引任务、角色来源交互和 SSE 仍缺少真实依赖环境下的集成测试。
+10. 已补前端 Markdown、分页响应单测和后端符号提取、敏感扫描、向量工具单测；本轮 `mvn -pl svc -am test` 通过（13 tests），`pnpm run test` 通过（2 个测试文件、4 tests），`pnpm run build` 通过。数据库 Mapper、知识库索引任务、角色来源交互和 SSE 仍缺少真实依赖环境下的集成测试。
 
 本轮继续收敛了索引状态问题：代码项目和个人知识库均已使用独立索引心跳字段，并在两个页面显示当前处理文件；兼容迁移见 `migration-20261008-indexprogress-audit.sql`。真实 PostgreSQL 迁移仍需在目标环境执行。
 

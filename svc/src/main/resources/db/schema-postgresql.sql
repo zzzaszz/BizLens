@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS ai_code_project (
     index_total_files INTEGER NOT NULL DEFAULT 0,
     index_processed_files INTEGER NOT NULL DEFAULT 0,
     index_skipped_files INTEGER NOT NULL DEFAULT 0,
+    index_started_at TIMESTAMP,
     index_heartbeat_at TIMESTAMP,
     index_current_file VARCHAR(1024),
     created_by      BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,

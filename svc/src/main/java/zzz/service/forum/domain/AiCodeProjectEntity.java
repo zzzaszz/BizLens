@@ -43,6 +43,8 @@ public class AiCodeProjectEntity implements Serializable {
     private Integer indexSkippedFiles;
     /** 索引任务最近一次心跳距今的毫秒数，由数据库时钟计算。 */
     private Long heartbeatElapsedMs;
+    /** 本次索引开始后经过的毫秒数，由数据库时钟计算。 */
+    private Long indexElapsedMs;
     /** 当前正在处理的文件相对路径。 */
     private String indexCurrentFile;
     private Long createdBy;

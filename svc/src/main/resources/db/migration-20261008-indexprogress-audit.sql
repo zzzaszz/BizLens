@@ -2,6 +2,7 @@
 ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_total_files INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_processed_files INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_skipped_files INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_started_at TIMESTAMP;
 ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_heartbeat_at TIMESTAMP;
 ALTER TABLE ai_code_project ADD COLUMN IF NOT EXISTS index_current_file VARCHAR(1024);
 
