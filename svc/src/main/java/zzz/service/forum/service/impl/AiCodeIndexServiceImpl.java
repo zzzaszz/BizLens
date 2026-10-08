@@ -48,7 +48,7 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * 每个切片会落一份截断后的源码原文（source_snippet），供对话时按关键词召回、
  * 注入模型理解业务逻辑；回答侧由 AiSafetyGuard 拦截源码输出。
- * 仍不执行 AST/Embedding，不做向量化。
+ * 代码结构提取已覆盖 Java AST、Mapper XML 和 Vue SFC；仍不执行 Embedding，不做向量化。
  */
 @Service("aiCodeIndexService")
 public class AiCodeIndexServiceImpl implements AiCodeIndexService {

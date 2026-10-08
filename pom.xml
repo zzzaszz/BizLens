@@ -61,6 +61,7 @@
         <aliyun-tea-util.version>0.2.13</aliyun-tea-util.version>
         <spring-cloud.version>3.0.3</spring-cloud.version>
         <nacos.version>2021.1</nacos.version>
+        <javaparser.version>3.25.10</javaparser.version>
     </properties>
 
     <dependencyManagement>
@@ -72,6 +73,13 @@
                 <version>${spring-boot.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- Java AST parser -->
+            <dependency>
+                <groupId>com.github.javaparser</groupId>
+                <artifactId>javaparser-core</artifactId>
+                <version>${javaparser.version}</version>
             </dependency>
 
             <!-- PostgreSQL -->
