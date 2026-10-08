@@ -25,6 +25,8 @@ public class CodeSymbolExtractorTest {
         assertEquals("listItems", symbols.get(0).getName());
         assertEquals(2, symbols.get(0).getStartLine());
         assertEquals(5, symbols.get(0).getEndLine());
+        assertTrue(symbols.get(0).getSummary().contains("查询"));
+        assertTrue(symbols.get(0).getSummary().contains("GET /items"));
     }
 
     @Test

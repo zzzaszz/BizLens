@@ -8,5 +8,7 @@ import zzz.service.forum.domain.AiCodeDocumentEntity;
 public interface AiCodeDocumentMapper {
     int deleteByProject(@Param("projectId") Long projectId);
 
+    int countByProject(@Param("projectId") Long projectId);
+
     int insert(AiCodeDocumentEntity entity);
 }

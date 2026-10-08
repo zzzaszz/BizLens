@@ -4,6 +4,9 @@
     <delete id="deleteByProject">
         DELETE FROM ai_code_document WHERE project_id = #{projectId}
     </delete>
+    <select id="countByProject" resultType="int">
+        SELECT COUNT(*) FROM ai_code_document WHERE project_id = #{projectId}
+    </select>
     <insert id="insert" parameterType="zzz.service.forum.domain.AiCodeDocumentEntity">
         INSERT INTO ai_code_document
         (id, project_id, path, language, checksum, symbol_name, summary, start_line, end_line, created_at, updated_at)

@@ -2,6 +2,7 @@ package zzz.service.forum.ai;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,6 +29,8 @@ public class CodeSymbolExtractor {
             "(?m)^[ \\t]*(?:export\\s+)?(?:async\\s+)?function\\s+(\\w+)\\s*\\(");
     private static final Pattern JS_ARROW = Pattern.compile(
             "(?m)^[ \\t]*(?:export\\s+)?(?:const|let)\\s+(\\w+)\\s*=\\s*(?:async\\s*)?(?:\\([^)]*\\)|\\w+)\\s*=>");
+    private static final Pattern ROUTE_ANNOTATION = Pattern.compile(
+            "@(Get|Post|Put|Delete|Patch|Request)Mapping\\s*\\(\\s*\\\"([^\\\"]+)\\\"");
     private static final Pattern SQL_TABLE = Pattern.compile(
             "(?i)\\b(?:from|join|update|into|table)\\s+([A-Za-z_][\\w$]*(?:\\.[A-Za-z_][\\w$]*)?)");
 
@@ -71,11 +74,51 @@ public class CodeSymbolExtractor {
                                 String type, String label) {
         Matcher matcher = pattern.matcher(source);
         while (matcher.find()) {
-            int start = includeLeadingAnnotations(lines, lineOf(source, matcher.start()));
+            int signatureLine = lineOf(source, matcher.start());
+            int start = includeLeadingAnnotations(lines, signatureLine);
             int end = closingLine(source, matcher.end() - 1, start);
             String name = matcher.group(1);
-            target.add(new Symbol(type, name, start, end, label + " " + name));
+            target.add(new Symbol(type, name, start, end,
+                    buildMethodSummary(name, lines, start, signatureLine, label)));
         }
+    }
+
+    /** 生成不依赖模型调用的基础摘要，避免把源码正文写入元数据。 */
+    private String buildMethodSummary(String name, String[] lines, int startLine, int signatureLine, String label) {
+        StringBuilder summary = new StringBuilder(label).append(' ').append(name)
+                .append("，动作：").append(inferAction(name));
+        String route = routeFromAnnotations(lines, startLine, signatureLine);
+        if (route != null) summary.append("，路由：").append(route);
+        return summary.toString();
+    }
+
+    private String routeFromAnnotations(String[] lines, int startLine, int signatureLine) {
+        for (int i = Math.max(0, startLine - 1); i < Math.min(lines.length, signatureLine); i++) {
+            Matcher matcher = ROUTE_ANNOTATION.matcher(lines[i]);
+            if (matcher.find()) return matcher.group(1).toUpperCase(Locale.ROOT) + " " + matcher.group(2);
+        }
+        return null;
+    }
+
+    private String inferAction(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        if (containsAny(normalized, "find", "query", "get", "list", "load", "search", "select")) return "查询";
+        if (containsAny(normalized, "create", "add", "save", "insert", "register")) return "创建";
+        if (containsAny(normalized, "update", "edit", "modify", "set")) return "更新";
+        if (containsAny(normalized, "delete", "remove", "clear")) return "删除";
+        if (containsAny(normalized, "export", "download")) return "导出";
+        if (containsAny(normalized, "import", "upload")) return "导入";
+        if (containsAny(normalized, "validate", "check", "verify")) return "校验";
+        if (containsAny(normalized, "count", "stat")) return "统计";
+        return "处理";
+    }
+
+    private boolean containsAny(String value, String... candidates) {
+        for (String candidate : candidates) {
+            if (value.startsWith(candidate) || value.contains("_" + candidate)
+                    || value.contains("-" + candidate)) return true;
+        }
+        return false;
     }
 
     /**

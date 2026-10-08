@@ -9,6 +9,7 @@ import zzz.service.forum.domain.AiCodeDocumentEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiCodeRelationCandidate;
 import zzz.service.forum.ai.CodeSymbolExtractor;
+import zzz.service.forum.ai.CodeSecretScanner;
 import zzz.service.forum.mapper.AiCodeChunkMapper;
 import zzz.service.forum.mapper.AiCodeDocumentMapper;
 import zzz.service.forum.mapper.AiCodeProjectMapper;
@@ -106,6 +107,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     @Resource
     private CryptoService cryptoService;
     private final CodeSymbolExtractor symbolExtractor = new CodeSymbolExtractor();
+    private final CodeSecretScanner secretScanner = new CodeSecretScanner();
 
     /** 启动时先做两件收尾：清遗留工作区、把上一轮中断的索引状态收敛掉 */
     @PostConstruct
@@ -158,6 +160,13 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             ACTIVE_WORKSPACES.add(isolatedHome);
             runGitClone(project, workspace, isolatedHome);
             String commit = runGitCommand(workspace, isolatedHome, "rev-parse", "HEAD").trim();
+            if (commit.equals(project.getGitCommit()) && documentMapper.countByProject(projectId) > 0) {
+                long durationMs = System.currentTimeMillis() - startedAt;
+                projectMapper.markIndexed(projectId, "READY", commit, durationMs);
+                log.info("code project index skipped, projectId={}, reason=same-commit, commit={}, durationMs={}",
+                        projectId, commit, durationMs);
+                return;
+            }
             documentMapper.deleteByProject(projectId);
             int totalFiles = countIndexableFiles(workspace);
             projectMapper.startIndex(projectId, totalFiles);
@@ -348,10 +357,13 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     }
 
     private void indexFile(Long projectId, Path root, Path file, long bytes) throws Exception {
-        String text = normalizeLineBreaks(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
+        String originalText = normalizeLineBreaks(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
+        CodeSecretScanner.ScanResult scan = secretScanner.scan(originalText);
+        String text = scan.getSanitizedText();
         String relativePath = root.relativize(file).toString().replace('\\', '/');
         String language = extension(file);
-        String checksum = sha256(text);
+        // 用原文 checksum 判断文件是否变化，落库内容使用脱敏后的文本。
+        String checksum = sha256(originalText);
         Date now = new Date();
         // 按行切一次，后面所有片段都从这里取，避免反复 split
         String[] lines = text.split("\\R", -1);
@@ -364,7 +376,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         document.setLanguage(language);
         document.setChecksum(checksum);
         document.setSymbolName(file.getFileName().toString());
-        document.setSummary("代码文件 " + relativePath + "，语言 " + language + "，大小 " + bytes + " 字节");
+        document.setSummary("代码文件 " + relativePath + "，语言 " + language + "，大小 " + bytes + " 字节"
+                + (scan.isRedacted() ? "，已脱敏敏感信息" : ""));
         document.setStartLine(1);
         document.setEndLine(lines.length);
         document.setCreatedAt(now);
@@ -382,6 +395,10 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
         chunk.setCreatedAt(now);
         chunkMapper.insert(chunk);
+        if (scan.isRedacted()) {
+            log.warn("code secrets redacted before persistence, projectId={}, path={}, rules={}",
+                    projectId, relativePath, scan.getRules());
+        }
 
         int symbolCount = 0;
         for (CodeSymbolExtractor.Symbol symbol : symbolExtractor.extract(language, text)) {
