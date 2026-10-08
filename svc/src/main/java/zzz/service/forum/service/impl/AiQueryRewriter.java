@@ -17,6 +17,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,6 +39,8 @@ public class AiQueryRewriter {
     private static final double TEMPERATURE = 0.1d;
     /** 最多取多少个关键词——每个词都要在全表上做 3 次 ILIKE，词太多会拖慢检索 */
     private static final int MAX_KEYWORDS = 8;
+    private static final int CACHE_MAX_SIZE = 512;
+    private static final long CACHE_TTL_MILLIS = 30L * 60L * 1000L;
     /** 过短的词（如 a、of）没有区分度，反而制造噪声 */
     private static final int MIN_KEYWORD_LENGTH = 3;
     /** 关键词允许的字符：标识符、路径片段、表名常见形态 */
@@ -62,6 +65,7 @@ public class AiQueryRewriter {
 
     @Resource
     private AiProvider aiProvider;
+    private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
     /**
      * @param question   用户原始问题
@@ -75,12 +79,81 @@ public class AiQueryRewriter {
         if (question == null || question.trim().isEmpty()) {
             return Collections.emptyList();
         }
+        String normalizedQuestion = normalizeQuestion(question);
+        String cacheKey = cacheKey(normalizedQuestion, model, apiKey, baseUrl, provider);
+        List<String> cached = getCached(cacheKey);
+        if (cached != null) {
+            log.info("query rewrite cache hit, keywords={}", cached.size());
+            return cached;
+        }
         List<String> fromModel = rewriteByModel(question, model, apiKey, baseUrl, provider);
         if (!fromModel.isEmpty()) {
-            return fromModel;
+            putCached(cacheKey, fromModel);
+            return new ArrayList<>(fromModel);
         }
         // 模型改写不可用时，至少把问题里原生的英文标识符捞出来
-        return fallbackKeywords(question);
+        List<String> fallback = fallbackKeywords(question);
+        putCached(cacheKey, fallback);
+        return new ArrayList<>(fallback);
+    }
+
+    private List<String> getCached(String key) {
+        CacheEntry entry = cache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (System.currentTimeMillis() - entry.createdAtMillis > CACHE_TTL_MILLIS) {
+            cache.remove(key, entry);
+            return null;
+        }
+        return new ArrayList<>(entry.keywords);
+    }
+
+    private void putCached(String key, List<String> keywords) {
+        if (key == null || keywords == null) {
+            return;
+        }
+        if (cache.size() >= CACHE_MAX_SIZE) {
+            evictExpiredOrOldest();
+        }
+        cache.put(key, new CacheEntry(keywords));
+    }
+
+    private void evictExpiredOrOldest() {
+        long now = System.currentTimeMillis();
+        String oldestKey = null;
+        long oldest = Long.MAX_VALUE;
+        for (java.util.Map.Entry<String, CacheEntry> item : cache.entrySet()) {
+            CacheEntry entry = item.getValue();
+            if (now - entry.createdAtMillis > CACHE_TTL_MILLIS) {
+                cache.remove(item.getKey(), entry);
+                continue;
+            }
+            if (entry.createdAtMillis < oldest) {
+                oldest = entry.createdAtMillis;
+                oldestKey = item.getKey();
+            }
+        }
+        if (cache.size() >= CACHE_MAX_SIZE && oldestKey != null) {
+            cache.remove(oldestKey);
+        }
+    }
+
+    private String cacheKey(String question, String model, String apiKey, String baseUrl, String provider) {
+        return nullToEmpty(provider) + '|' + nullToEmpty(baseUrl) + '|' + nullToEmpty(model)
+                + '|' + hasText(apiKey) + '|' + question;
+    }
+
+    private String normalizeQuestion(String question) {
+        return question == null ? "" : question.trim().replaceAll("\\s+", " ");
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private List<String> rewriteByModel(String question, String model, String apiKey, String baseUrl, String provider) {
@@ -145,5 +218,15 @@ public class AiQueryRewriter {
     /** 过滤掉代码里几乎不会作为标识符出现的常见英文词 */
     private boolean isCommonWord(String token) {
         return COMMON_WORDS.contains(token.toLowerCase(Locale.ROOT));
+    }
+
+    private static final class CacheEntry {
+        private final List<String> keywords;
+        private final long createdAtMillis;
+
+        private CacheEntry(List<String> keywords) {
+            this.keywords = Collections.unmodifiableList(new ArrayList<>(keywords));
+            this.createdAtMillis = System.currentTimeMillis();
+        }
     }
 }

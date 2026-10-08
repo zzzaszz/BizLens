@@ -57,6 +57,7 @@ public class AiCodeRetrievalService {
     private AiQueryRewriter queryRewriter;
     @Resource
     private AiEmbeddingProvider embeddingProvider;
+    private volatile boolean vectorSearchDisabled;
 
     /**
      * 检索与问题相关的代码切片。
@@ -79,7 +80,13 @@ public class AiCodeRetrievalService {
             if (isFileOverviewQuestion(question)) {
                 keywords = mergeExplicitKeywords(question, keywords);
             }
+            List<AiCodeChunkHit> vectorHits = Collections.emptyList();
             if (keywords.isEmpty()) {
+                vectorHits = searchByVector(projectIds, question);
+                if (!vectorHits.isEmpty()) {
+                    log.info("knowledge retrieval completed by vector only, projectIds={}, hits={}", projectIds, vectorHits.size());
+                    return vectorHits;
+                }
                 log.info("未得到可用检索词，跳过知识库召回: projectIds={}", projectIds);
                 return Collections.emptyList();
             }
@@ -91,8 +98,8 @@ public class AiCodeRetrievalService {
                     return complete;
                 }
             }
+            vectorHits = searchByVector(projectIds, question);
             List<AiCodeChunkHit> keywordHits = chunkMapper.searchByKeywords(projectIds, keywords, MAX_HITS);
-            List<AiCodeChunkHit> vectorHits = searchByVector(projectIds, question);
             List<AiCodeChunkHit> hits = mergeUnique(vectorHits, keywordHits, MAX_HITS);
             hits = expandOneHopInheritance(hits, keywords);
             if (isCallChainQuestion(question) && hits != null && !hits.isEmpty()) {
@@ -135,7 +142,7 @@ public class AiCodeRetrievalService {
     }
 
     private List<AiCodeChunkHit> searchByVector(List<Long> projectIds, String question) {
-        if (embeddingProvider == null || !embeddingProvider.isEnabled()) {
+        if (vectorSearchDisabled || embeddingProvider == null || !embeddingProvider.isEnabled()) {
             return Collections.emptyList();
         }
         try {
@@ -145,9 +152,25 @@ public class AiCodeRetrievalService {
             List<AiCodeChunkHit> hits = chunkMapper.searchByVector(projectIds, vector, MAX_HITS);
             return hits == null ? Collections.<AiCodeChunkHit>emptyList() : hits;
         } catch (Exception e) {
+            if (isVectorInfrastructureError(e)) {
+                vectorSearchDisabled = true;
+                log.warn("vector retrieval disabled for this process, fallback to keyword retrieval: {}", e.getMessage());
+                return Collections.emptyList();
+            }
             log.warn("向量召回失败，回退关键词召回: {}", e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private boolean isVectorInfrastructureError(Exception e) {
+        String message = e == null || e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+        return message.contains("embedding_vec")
+                || message.contains("type \"vector\"")
+                || message.contains("type vector")
+                || message.contains("operator does not exist")
+                || message.contains("does not exist") && message.contains("vector")
+                || message.contains("relation") && message.contains("vector")
+                || message.contains("column") && message.contains("vector");
     }
 
     private List<AiCodeChunkHit> retrieveCompleteFiles(List<Long> projectIds, List<String> keywords) {

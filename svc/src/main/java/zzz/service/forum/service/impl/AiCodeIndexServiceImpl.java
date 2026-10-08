@@ -112,6 +112,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private AiEmbeddingProvider embeddingProvider;
     private final CodeSymbolExtractor symbolExtractor = new CodeSymbolExtractor();
     private final CodeSecretScanner secretScanner = new CodeSecretScanner();
+    private volatile boolean vectorPersistenceDisabled;
 
     /** 启动时先做两件收尾：清遗留工作区、把上一轮中断的索引状态收敛掉 */
     @PostConstruct
@@ -399,7 +400,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         chunk.setEmbeddingVector(embeddingLiteral(document.getSummary() + "\n" + text));
         chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
         chunk.setCreatedAt(now);
-        chunkMapper.insert(chunk);
+        insertChunk(chunk);
         if (scan.isRedacted()) {
             log.warn("code secrets redacted before persistence, projectId={}, path={}, rules={}",
                     projectId, relativePath, scan.getRules());
@@ -422,12 +423,13 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             symbolChunk.setEmbeddingVector(embeddingLiteral(symbolChunk.getBusinessSummary() + "\n" + (snippet == null ? "" : snippet)));
             symbolChunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":" + symbol.getStartLine() + ",\"endLine\":" + symbol.getEndLine() + "}");
             symbolChunk.setCreatedAt(now);
-            chunkMapper.insert(symbolChunk);
+            insertChunk(symbolChunk);
         }
     }
 
     private String embeddingLiteral(String text) {
-        if (embeddingProvider == null || !embeddingProvider.isEnabled() || text == null || text.trim().isEmpty()) {
+        if (vectorPersistenceDisabled || embeddingProvider == null || !embeddingProvider.isEnabled()
+                || text == null || text.trim().isEmpty()) {
             return null;
         }
         try {
@@ -436,6 +438,32 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             log.warn("embedding failed, skip vector persistence: {}", e.getMessage());
             return null;
         }
+    }
+
+    private void insertChunk(AiCodeChunkEntity chunk) throws Exception {
+        try {
+            chunkMapper.insert(chunk);
+        } catch (Exception e) {
+            if (chunk != null && chunk.getEmbeddingVector() != null && isVectorInfrastructureError(e)) {
+                vectorPersistenceDisabled = true;
+                chunk.setEmbeddingVector(null);
+                log.warn("vector persistence disabled for this process, retry chunk insert without embedding: {}", e.getMessage());
+                chunkMapper.insert(chunk);
+                return;
+            }
+            throw e;
+        }
+    }
+
+    private boolean isVectorInfrastructureError(Exception e) {
+        String message = e == null || e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+        return message.contains("embedding_vec")
+                || message.contains("type \"vector\"")
+                || message.contains("type vector")
+                || message.contains("operator does not exist")
+                || message.contains("does not exist") && message.contains("vector")
+                || message.contains("relation") && message.contains("vector")
+                || message.contains("column") && message.contains("vector");
     }
 
     /**
