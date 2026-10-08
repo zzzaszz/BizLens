@@ -151,6 +151,7 @@ import {
   codeProjectCreate, codeProjectDelete, codeProjectList,
   codeProjectQueueIndex, codeProjectQueueIndexAll, codeProjectUpdate, aiAgentList
 } from '@/api'
+import { listRecords } from '@/utils/pagination'
 
 const router = useRouter()
 const projects = ref([])
@@ -306,7 +307,8 @@ function indexActionText(row) {
 
 /** 关联到该项目的角色（一个项目可被多个角色关联；角色也可同时关联多个项目） */
 function agentsOf(projectId) {
-  return agents.value.filter(a => (a.projectIds || []).includes(projectId))
+  return agents.value.filter(a => (a.projectIds || [])
+    .some(id => String(id) === String(projectId)))
 }
 
 /** 把 Git 的原始报错归成一类可操作提示；完整报错在 tooltip 里 */
@@ -382,7 +384,7 @@ async function loadProjects(page = projectPage.value, quiet = false) {
       projects.value = data.records || []
       projectTotal.value = Number(data.total || 0)
     }
-    if (agentRes.code === 200) agents.value = agentRes.data || []
+    if (agentRes.code === 200) agents.value = listRecords(agentRes.data)
     // 记下这次拉取的时刻：服务端 elapsedMs 是"拉取那一刻"的值，之后由本地时钟往上叠加
     lastFetchedAt.value = Date.now()
   } finally {
