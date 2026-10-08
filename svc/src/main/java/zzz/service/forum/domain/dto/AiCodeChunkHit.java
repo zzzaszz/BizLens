@@ -32,6 +32,8 @@ public class AiCodeChunkHit implements Serializable {
     private Integer endLine;
     /** 命中权重，越大越相关 */
     private Integer score;
+    /** 向量相似度，越大越相关。 */
+    private Double similarity;
     /** 是否由一跳继承关系补充 */
     private boolean inherited;
     /** 是否属于文件级完整检索结果；此类结果不受普通召回条数限制。 */

@@ -8,8 +8,10 @@ import zzz.service.forum.domain.AiCodeChunkEntity;
 import zzz.service.forum.domain.AiCodeDocumentEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
 import zzz.service.forum.domain.dto.AiCodeRelationCandidate;
+import zzz.service.forum.ai.AiEmbeddingProvider;
 import zzz.service.forum.ai.CodeSymbolExtractor;
 import zzz.service.forum.ai.CodeSecretScanner;
+import zzz.service.forum.ai.EmbeddingVectorUtils;
 import zzz.service.forum.mapper.AiCodeChunkMapper;
 import zzz.service.forum.mapper.AiCodeDocumentMapper;
 import zzz.service.forum.mapper.AiCodeProjectMapper;
@@ -106,6 +108,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private SnowflakeIdGenerator snowflakeIdGenerator;
     @Resource
     private CryptoService cryptoService;
+    @Resource
+    private AiEmbeddingProvider embeddingProvider;
     private final CodeSymbolExtractor symbolExtractor = new CodeSymbolExtractor();
     private final CodeSecretScanner secretScanner = new CodeSecretScanner();
 
@@ -392,6 +396,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         chunk.setBusinessSummary(document.getSummary());
         // FILE 切片保存完整正文，文件级检索才能在需要时覆盖整个文件；普通召回仍由上下文预算控制。
         chunk.setSourceSnippet(text);
+        chunk.setEmbeddingVector(embeddingLiteral(document.getSummary() + "\n" + text));
         chunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":1,\"endLine\":" + document.getEndLine() + "}");
         chunk.setCreatedAt(now);
         chunkMapper.insert(chunk);
@@ -414,9 +419,22 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
                     ? sliceLines(lines, symbol.getStartLine(), symbol.getEndLine(), MAX_SNIPPET_CHARS)
                     : null;
             symbolChunk.setSourceSnippet(snippet);
+            symbolChunk.setEmbeddingVector(embeddingLiteral(symbolChunk.getBusinessSummary() + "\n" + (snippet == null ? "" : snippet)));
             symbolChunk.setMetadata("{\"path\":\"" + jsonEscape(relativePath) + "\",\"language\":\"" + jsonEscape(language) + "\",\"startLine\":" + symbol.getStartLine() + ",\"endLine\":" + symbol.getEndLine() + "}");
             symbolChunk.setCreatedAt(now);
             chunkMapper.insert(symbolChunk);
+        }
+    }
+
+    private String embeddingLiteral(String text) {
+        if (embeddingProvider == null || !embeddingProvider.isEnabled() || text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return EmbeddingVectorUtils.toPgVectorLiteral(embeddingProvider.embed(text), embeddingProvider.dimension());
+        } catch (Exception e) {
+            log.warn("embedding failed, skip vector persistence: {}", e.getMessage());
+            return null;
         }
     }
 

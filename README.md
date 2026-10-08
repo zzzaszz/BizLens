@@ -17,11 +17,11 @@ BizLens AI 是面向企业代码知识库的业务问答系统。系统通过 AI
 - Prompt 注入检测与 AI 输出安全拦截；流式为逐段推送（打字机），命中拦截时用替换事件纠正
 - 全局异常兜底，接口异常统一返回 `R` 结构
 - PostgreSQL 持久化：用户、AI 会话、代码知识库索引和安全审计
-- 代码项目、文档、方法切片和调用关系的数据模型；已支持关键词召回式 Code RAG（无向量）、文件级完整检索、调用链追踪和一跳继承扩展
+- 代码项目、文档、方法切片和调用关系的数据模型；已支持关键词 + 可选 pgvector 语义召回的 Code RAG、文件级完整检索、调用链追踪和一跳继承扩展
 - 基础工作台和 `/api/system/health` 服务探针
 - 代码项目元数据管理、归属校验和索引任务排队入口
-- 基础 Git 临时工作区索引：浅克隆、文件元数据、切片源码、轻量方法/符号级切片、Commit 和状态回写；项目页展示索引统计
-- 对话时按「问题改写 → 关键词召回 → 注入模型」检索项目内代码切片，回答只输出业务解释，源码由安全拦截挡住
+- 基础 Git 临时工作区索引：浅克隆、文件元数据、切片源码、结构化符号切片、可选 embedding、Commit 和状态回写；项目页展示索引统计
+- 对话时按「问题改写 / 问题向量化 → 混合召回 → 注入模型」检索项目内代码切片，回答只输出业务解释，源码由安全拦截挡住
 
 原拷贝项目中的论坛、聊天室、私信、板块和帖子功能已移除，前端工作台仅保留系统状态、AI 对话和 AI 角色入口。
 
@@ -56,6 +56,7 @@ docs/    项目开发文档与开发日志
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-projectid.sql      # AiAgent.ProjectId
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-sourcesnippet.sql  # ai_code_chunk.source_snippet
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-indexerror.sql     # ai_code_project.last_error
+   psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20261008-pgvector.sql       # ai_code_chunk.embedding_vec
    ```
 
    `migration-*-projectid.sql` 会清理与新模型不兼容的历史角色（旧模型下角色不与项目绑定），**执行前请备份 `"AiAgent"`**。
@@ -75,7 +76,14 @@ docs/    项目开发文档与开发日志
    REDIS_PASSWORD=
    AES_KEY=at-least-32-byte-secret
    JWT_SECRET=at-least-32-byte-jwt-secret
+   AI_EMBEDDING_ENABLED=false
+   AI_EMBEDDING_BASE_URL=
+   AI_EMBEDDING_API_KEY=
+   AI_EMBEDDING_MODEL=text-embedding-3-small
+   AI_EMBEDDING_DIMENSION=1536
    ```
+
+   启用语义召回时需要先执行 `migration-20261008-pgvector.sql`，并保证 `AI_EMBEDDING_DIMENSION` 与脚本中的 `VECTOR(1536)` 一致；未启用时系统继续使用关键词召回。
 
    可选（**克隆 Git 仓库时的出口网络**）：索引克隆**不继承运行机器的代理设置**，默认直连。
    如果服务所在机器访问外网 Git（如 github.com）必须经代理，就在这里显式声明：
@@ -153,7 +161,7 @@ docs/    项目开发文档与开发日志
 - [x] 统一项目命名：BizLens AI、Maven 坐标、前端包名和 Spring Boot 启动类
 - [x] 通过后端 Maven 编译和前端 Vite 生产构建
 - [x] 角色与代码项目**多对多**：一个角色可覆盖多个项目（如前后端共用一个角色），一个项目也可建多个角色；关联项目必须全部完成索引才能对话
-- [x] 索引切片落源码片段，对话前用模型把问题改写成候选标识符，再按关键词召回并注入
+- [x] 索引切片落源码片段，对话前用模型把问题改写成候选标识符，并可按 pgvector 语义召回融合注入
 - [x] 建会话时即校验角色可用（API Key + 项目已索引），不再等到发消息才失败；未就绪项目不允许建角色
 - [x] 会话历史可回溯可续聊：列表返回全部状态，已关闭会话可查看历史并在发送时自动重新打开
 - [x] 消息落库时回写会话更新时间（会话列表按它倒序，此前不回写导致排序与时间失真）
@@ -182,6 +190,7 @@ docs/    项目开发文档与开发日志
 - [x] Git Commit 增量跳过：同一项目同一成功 Commit 已有索引时跳过重复解析
 - [x] 方法级基础业务摘要：根据方法名和路由注解生成动作、路由摘要并写入 `business_summary`
 - [x] 结构化符号提取：Java 使用 JavaParser AST，Mapper XML 使用安全 DOM，Vue 按 SFC script/template 提取
+- [x] pgvector 语义召回：可选接入 OpenAI-compatible embedding，索引写入 `embedding_vec`，问答融合向量召回与关键词召回
 - [x] 补测试文档 `docs/测试文档.md`，覆盖本轮全部改动与发现的问题
 
 已补充前端 Markdown 单测和后端符号提取单测；主流程与真实 PostgreSQL 仍未完整跑通，具体缺口见下方「待测试 / 未验证」。
@@ -190,17 +199,14 @@ docs/    项目开发文档与开发日志
 
 **功能性缺口**（有入口、但后端能力不完整）
 
-1. 将 embedding 接入 pgvector 或独立向量数据库，把当前的关键词召回升级为语义召回。
-2. 将个人知识库接入现有 Git 项目 Q&A，实现统一 RAG，使项目新建时可选择个人知识库或代码项目，参考 [个人知识库方案](docs/个人知识库.md)。
+1. 将个人知识库接入现有 Git 项目 Q&A，实现统一 RAG，使项目新建时可选择个人知识库或代码项目，参考 [个人知识库方案](docs/个人知识库.md)。
 
 ### 已知限制与待优化
 
-1. **关键词召回依赖模型改写**。中文问题会被转成候选标识符再去 ILIKE 匹配，业务术语只出现在代码
-   注释或字符串字面量里时召回不全（例如 `// 订单超过 30 分钟未支付自动关单`）。根治要等向量化。
+1. **语义召回依赖 pgvector 与 embedding 配置**。未执行 pgvector 迁移或未配置 `AI_EMBEDDING_*` 时，系统会自动退回关键词召回。
 2. **每条消息多一次模型调用**（查询改写），延迟增加约 1~2 秒、token 成本相应上升；
    且改写结果没有缓存，同一问题重复提问会重复改写。
-3. **召回查询是全表 ILIKE**，`ai_code_chunk` 上没有索引。数据量小时无感，切片数上万后需要
-   引入 `pg_trgm` 索引或走向量化。
+3. **关键词召回查询仍是全表 ILIKE**，作为向量召回的补充和降级路径保留。数据量上万后仍建议补 `pg_trgm` 索引。
 4. **索引存在上限**：`MAX_FILES = 2000`、`MAX_FILE_BYTES = 2MB`，超出的文件会跳过；现在会统计跳过数并在
    索引进度中显示，但业务仍需决定是否提高上限或拆分任务。
 5. **索引进度是文件级近似值**。当前按可索引文件扫描结果显示已处理/总数百分比，单文件内部解析仍没有更细粒度进度。
@@ -227,15 +233,14 @@ docs/    项目开发文档与开发日志
    所有 SQL 只做了括号平衡、外键引用顺序、语句数等静态校验，没有真正打过数据库。
 2. **端到端主流程未走通**：注册 → 建代码项目 → 排队索引 → 建 AI 角色 → 对话。
    各环节分别验证过编译或单点行为，但没有一次完整的串联验证。
-3. **召回 SQL 未在真实库执行过**。`AiCodeChunkMapper.searchByKeywords` 的 `<foreach>` 展开、
-   `metadata->>'startLine'` 取值、`ILIKE` 命中权重都只经过人工审查，没有跑过一次真实查询。
+3. **召回 SQL 未在真实库执行过**。关键词召回的 `<foreach>`、`metadata->>'startLine'`、`ILIKE` 权重，以及向量召回的 `embedding_vec <=> query` 都只经过编译与静态审查，没有跑过一次真实查询。
 4. **重新索引后 `source_snippet` 是否正常写入未验证**——这是召回能否工作的前提。
 5. **SSE 多行修复未运行时验证**。上次启动验证时 10610 被占用，未完成启动。
 6. **索引失败原因落库与前端展示未验证**。
 
 **已静态验证、但未运行时验证的**
 
-7. 无向量召回的实际命中率没有评测，"问题改写 → 关键词匹配"这条路径对中文业务问题的效果未知。
+7. 混合召回的实际命中率没有评测，尤其是 embedding 语义召回对中文业务问题的提升幅度未知。
 8. **源码注入上下文后 `AiSafetyGuard` 的拦截效果未验证**：源码现在会进 prompt，
    模型是否真按约束用业务语言转述而不复述源码，需要构造用例实测。
 9. `/ai/agent/models` 只实测过 `deepseek` 分支（真实返回 `deepseek-flash`、`deepseek-v4-pro`）；
@@ -243,7 +248,7 @@ docs/    项目开发文档与开发日志
 
 **工程基础**
 
-10. 已补前端 Markdown 单测和后端符号提取单测；数据库 Mapper、索引任务和 SSE 仍缺少真实依赖环境下的集成测试。
+10. 已补前端 Markdown 单测和后端符号提取、敏感扫描、向量工具单测；数据库 Mapper、索引任务和 SSE 仍缺少真实依赖环境下的集成测试。
 
 每完成一项，请同步更新本节勾选状态，并在 [开发日志](docs/开发日志.md) 中记录日期、变更和验证结果。
 

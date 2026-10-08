@@ -10,7 +10,7 @@ import java.util.Date;
  * <p>
  * source_snippet 落库的是该切片的源码原文（已按长度预算截断），供对话时召回注入模型理解业务逻辑；
  * 模型回答侧仍由 AiSafetyGuard 拦截源码输出，源码只进上下文、不出回答。
- * embedding 仍为空，本阶段不做向量化。
+ * embedding_vec 可选启用；未配置 embedding provider 时保持为空，召回退回关键词链路。
  */
 @Data
 public class AiCodeChunkEntity implements Serializable {
@@ -24,5 +24,7 @@ public class AiCodeChunkEntity implements Serializable {
     private String metadata;
     /** 切片对应的源码原文（已截断），用于对话时的业务理解 */
     private String sourceSnippet;
+    /** pgvector 字面量，如 [0.1,0.2,...]；为空时不写向量。 */
+    private String embeddingVector;
     private Date createdAt;
 }

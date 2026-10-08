@@ -3,6 +3,8 @@ package zzz.service.forum.service.impl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import zzz.service.forum.ai.AiEmbeddingProvider;
+import zzz.service.forum.ai.EmbeddingVectorUtils;
 import zzz.service.forum.domain.dto.AiCodeChunkHit;
 import zzz.service.forum.mapper.AiCodeChunkMapper;
 
@@ -53,6 +55,8 @@ public class AiCodeRetrievalService {
     private AiCodeChunkMapper chunkMapper;
     @Resource
     private AiQueryRewriter queryRewriter;
+    @Resource
+    private AiEmbeddingProvider embeddingProvider;
 
     /**
      * 检索与问题相关的代码切片。
@@ -87,7 +91,9 @@ public class AiCodeRetrievalService {
                     return complete;
                 }
             }
-            List<AiCodeChunkHit> hits = chunkMapper.searchByKeywords(projectIds, keywords, MAX_HITS);
+            List<AiCodeChunkHit> keywordHits = chunkMapper.searchByKeywords(projectIds, keywords, MAX_HITS);
+            List<AiCodeChunkHit> vectorHits = searchByVector(projectIds, question);
+            List<AiCodeChunkHit> hits = mergeUnique(vectorHits, keywordHits, MAX_HITS);
             hits = expandOneHopInheritance(hits, keywords);
             if (isCallChainQuestion(question) && hits != null && !hits.isEmpty()) {
                 List<Long> seeds = new ArrayList<>();
@@ -118,12 +124,28 @@ public class AiCodeRetrievalService {
                     }
                 }
             }
-            log.info("知识库召回完成: projectIds={}, keywords={}, hits={}",
-                    projectIds, keywords.size(), hits == null ? 0 : hits.size());
+            log.info("知识库召回完成: projectIds={}, keywords={}, vectorHits={}, hits={}",
+                    projectIds, keywords.size(), vectorHits.size(), hits == null ? 0 : hits.size());
             return hits == null ? Collections.emptyList() : hits;
         } catch (Exception e) {
             // 召回失败不该挡住建对话：退化成没有知识库的普通问答，比直接报错好
             log.warn("知识库召回失败，本轮按无知识库处理: projectIds={}, err={}", projectIds, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private List<AiCodeChunkHit> searchByVector(List<Long> projectIds, String question) {
+        if (embeddingProvider == null || !embeddingProvider.isEnabled()) {
+            return Collections.emptyList();
+        }
+        try {
+            String vector = EmbeddingVectorUtils.toPgVectorLiteral(
+                    embeddingProvider.embed(question), embeddingProvider.dimension());
+            if (vector == null) return Collections.emptyList();
+            List<AiCodeChunkHit> hits = chunkMapper.searchByVector(projectIds, vector, MAX_HITS);
+            return hits == null ? Collections.<AiCodeChunkHit>emptyList() : hits;
+        } catch (Exception e) {
+            log.warn("向量召回失败，回退关键词召回: {}", e.getMessage());
             return Collections.emptyList();
         }
     }

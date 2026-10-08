@@ -3,10 +3,20 @@
 <mapper namespace="zzz.service.forum.mapper.AiCodeChunkMapper">
 
     <insert id="insert" parameterType="zzz.service.forum.domain.AiCodeChunkEntity">
-        INSERT INTO ai_code_chunk
-        (id, document_id, chunk_type, symbol_name, business_summary, source_snippet, metadata, created_at)
-        VALUES (#{id}, #{documentId}, #{chunkType}, #{symbolName}, #{businessSummary}, #{sourceSnippet},
-                CAST(#{metadata} AS jsonb), #{createdAt})
+        <choose>
+            <when test="embeddingVector != null">
+                INSERT INTO ai_code_chunk
+                (id, document_id, chunk_type, symbol_name, business_summary, source_snippet, embedding_vec, metadata, created_at)
+                VALUES (#{id}, #{documentId}, #{chunkType}, #{symbolName}, #{businessSummary}, #{sourceSnippet},
+                        CAST(#{embeddingVector} AS vector), CAST(#{metadata} AS jsonb), #{createdAt})
+            </when>
+            <otherwise>
+                INSERT INTO ai_code_chunk
+                (id, document_id, chunk_type, symbol_name, business_summary, source_snippet, metadata, created_at)
+                VALUES (#{id}, #{documentId}, #{chunkType}, #{symbolName}, #{businessSummary}, #{sourceSnippet},
+                        CAST(#{metadata} AS jsonb), #{createdAt})
+            </otherwise>
+        </choose>
     </insert>
 
     <delete id="deleteRelationsByProject">
@@ -168,6 +178,7 @@
         <result property="startLine" column="start_line"/>
         <result property="endLine" column="end_line"/>
         <result property="score" column="score"/>
+        <result property="similarity" column="similarity"/>
         <result property="relationDepth" column="relation_depth"/>
         <result property="relationType" column="relation_type"/>
     </resultMap>
@@ -222,6 +233,30 @@
           会让同一个问题两次问出不同结果，排查时无从下手。
         -->
         ORDER BY score DESC, length(c.source_snippet) DESC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchByVector" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.project_id,
+               d.path,
+               d.language,
+               c.chunk_type,
+               c.symbol_name,
+               c.business_summary,
+               c.source_snippet,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0)   AS end_line,
+               0 AS score,
+               (1 - (c.embedding_vec &lt;=&gt; CAST(#{vector} AS vector))) AS similarity
+        FROM ai_code_chunk c
+        JOIN ai_code_document d ON d.id = c.document_id
+        WHERE d.project_id IN
+              <foreach collection="projectIds" item="pid" open="(" separator="," close=")">#{pid}</foreach>
+          AND c.source_snippet IS NOT NULL
+          AND c.embedding_vec IS NOT NULL
+        ORDER BY c.embedding_vec &lt;=&gt; CAST(#{vector} AS vector), c.id ASC
         LIMIT #{limit}
     </select>
 

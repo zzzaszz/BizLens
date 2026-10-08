@@ -48,6 +48,11 @@ public interface AiCodeChunkMapper {
                                           @Param("keywords") List<String> keywords,
                                           @Param("limit") int limit);
 
+    /** 按 pgvector 余弦距离召回语义相近切片。 */
+    List<AiCodeChunkHit> searchByVector(@Param("projectIds") List<Long> projectIds,
+                                        @Param("vector") String vector,
+                                        @Param("limit") int limit);
+
     /**
      * 在指定项目的父类文件中，按方法符号名补充一跳继承关系命中。
      * 只查方法切片，不递归继续追踪父类的父类。
