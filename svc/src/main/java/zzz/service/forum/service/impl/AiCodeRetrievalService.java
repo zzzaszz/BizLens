@@ -6,7 +6,9 @@ import org.springframework.stereotype.Component;
 import zzz.service.forum.ai.AiEmbeddingProvider;
 import zzz.service.forum.ai.EmbeddingVectorUtils;
 import zzz.service.forum.domain.dto.AiCodeChunkHit;
+import zzz.service.forum.domain.dto.AiKnowledgeChunkHit;
 import zzz.service.forum.mapper.AiCodeChunkMapper;
+import zzz.service.forum.mapper.AiKnowledgeChunkMapper;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -57,7 +59,10 @@ public class AiCodeRetrievalService {
     private AiQueryRewriter queryRewriter;
     @Resource
     private AiEmbeddingProvider embeddingProvider;
+    @Resource
+    private AiKnowledgeChunkMapper knowledgeChunkMapper;
     private volatile boolean vectorSearchDisabled;
+    private volatile boolean knowledgeVectorSearchDisabled;
 
     /**
      * 检索与问题相关的代码切片。
@@ -171,6 +176,67 @@ public class AiCodeRetrievalService {
                 || message.contains("does not exist") && message.contains("vector")
                 || message.contains("relation") && message.contains("vector")
                 || message.contains("column") && message.contains("vector");
+    }
+
+    /** Retrieve personal Markdown knowledge chunks within the selected source scope. */
+    public List<AiKnowledgeChunkHit> retrieveKnowledge(List<Long> sourceIds, String question,
+                                                       String model, String apiKey, String baseUrl, String provider) {
+        if (sourceIds == null || sourceIds.isEmpty() || question == null || question.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        try {
+            List<String> keywords = queryRewriter.rewrite(question, model, apiKey, baseUrl, provider);
+            List<AiKnowledgeChunkHit> vectorHits = searchKnowledgeByVector(sourceIds, question);
+            if (keywords.isEmpty()) return vectorHits;
+            List<AiKnowledgeChunkHit> keywordHits = knowledgeChunkMapper.searchByKeywords(sourceIds, keywords, MAX_HITS);
+            return mergeKnowledgeUnique(vectorHits, keywordHits, MAX_HITS);
+        } catch (Exception e) {
+            log.warn("knowledge retrieval failed, sourceIds={}, err={}", sourceIds, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    public String buildKnowledgeContext(List<AiKnowledgeChunkHit> hits) {
+        if (hits == null || hits.isEmpty()) return null;
+        StringBuilder context = new StringBuilder();
+        for (AiKnowledgeChunkHit hit : hits) {
+            if (hit == null || hit.getContent() == null || hit.getContent().trim().isEmpty()) continue;
+            context.append("\n--- 个人知识库：").append(hit.getSourceName()).append(" / ").append(hit.getPath());
+            if (hit.getHeadingPath() != null && !hit.getHeadingPath().isEmpty()) context.append(" [").append(hit.getHeadingPath()).append(']');
+            if (hit.getStartLine() != null && hit.getStartLine() > 0) context.append(" 第").append(hit.getStartLine()).append('-').append(hit.getEndLine()).append(" 行");
+            context.append(" ---\n").append(hit.getContent()).append('\n');
+        }
+        return context.length() == 0 ? null : context.toString();
+    }
+
+    private List<AiKnowledgeChunkHit> searchKnowledgeByVector(List<Long> sourceIds, String question) {
+        if (knowledgeVectorSearchDisabled || embeddingProvider == null || !embeddingProvider.isEnabled()) return Collections.emptyList();
+        try {
+            String vector = EmbeddingVectorUtils.toPgVectorLiteral(embeddingProvider.embed(question), embeddingProvider.dimension());
+            if (vector == null) return Collections.emptyList();
+            List<AiKnowledgeChunkHit> hits = knowledgeChunkMapper.searchByVector(sourceIds, vector, MAX_HITS);
+            return hits == null ? Collections.<AiKnowledgeChunkHit>emptyList() : hits;
+        } catch (Exception e) {
+            if (isVectorInfrastructureError(e)) {
+                knowledgeVectorSearchDisabled = true;
+                log.warn("knowledge vector retrieval disabled for this process: {}", e.getMessage());
+            } else {
+                log.warn("knowledge vector retrieval failed: {}", e.getMessage());
+            }
+            return Collections.emptyList();
+        }
+    }
+
+    private List<AiKnowledgeChunkHit> mergeKnowledgeUnique(List<AiKnowledgeChunkHit> first,
+                                                           List<AiKnowledgeChunkHit> second, int limit) {
+        List<AiKnowledgeChunkHit> merged = new ArrayList<>();
+        Set<String> keys = new HashSet<>();
+        for (AiKnowledgeChunkHit hit : first) if (hit != null && keys.add(String.valueOf(hit.getChunkId()))) merged.add(hit);
+        for (AiKnowledgeChunkHit hit : second) {
+            if (hit != null && keys.add(String.valueOf(hit.getChunkId()))) merged.add(hit);
+            if (merged.size() >= limit) break;
+        }
+        return merged;
     }
 
     private List<AiCodeChunkHit> retrieveCompleteFiles(List<Long> projectIds, List<String> keywords) {

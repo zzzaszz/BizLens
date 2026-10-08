@@ -49,6 +49,9 @@
             :stroke-width="5" class="index-progress" />
           <!-- 进度/时间：索引中显示已用多久与预计，完成显示完成时间，中断显示中断时间 -->
           <p v-if="statusTimeText(row)" class="status-time">{{ statusTimeText(row) }}</p>
+          <p v-if="row.indexCurrentFile && isIndexRunning(row)" class="status-file" :title="row.indexCurrentFile">
+            正在处理：{{ row.indexCurrentFile }}
+          </p>
           <!-- 索引失败/中断要能看到原因，否则只有一个标签没法排查 -->
           <el-tooltip v-if="row.lastError" placement="top" :show-after="100">
             <template #content>
@@ -203,20 +206,21 @@ const lastFetchedAt = ref(Date.now())
 /**
  * 状态距今多少秒。
  * <p>
- * 基准是服务端返回的 elapsedMs（由数据库自己用 now() - updated_at 算好），
- * 这里只叠加"拉取之后又过了多久"。**不能**直接拿浏览器时钟减 updated_at：
+ * 运行状态优先使用服务端按独立心跳字段计算的 heartbeatElapsedMs，
+ * 这里只叠加"拉取之后又过了多久"。普通 elapsedMs 只作为旧数据库结构的降级：
  * updated_at 是数据库时钟写的，浏览器是客户端时钟，两者不一致时（本机实测差 13 秒）
  * 会出现"刚开始就显示已用 13 秒"。
  */
 function secondsSinceUpdate(row) {
-  if (row.elapsedMs == null) {
+  const baseMs = row.heartbeatElapsedMs != null ? row.heartbeatElapsedMs : row.elapsedMs
+  if (baseMs == null) {
     // 后端还没升级、没返回 elapsedMs 时的降级：退回用本地时钟算。
     // 会受客户端/服务端时钟偏差影响（本机实测差 13 秒），数字可能偏大，但不会显示错状态。
     if (!row.updatedAt) return Infinity
     return (nowTick.value - new Date(row.updatedAt.replace(' ', 'T')).getTime()) / 1000
   }
   const sinceFetch = (nowTick.value - lastFetchedAt.value) / 1000
-  return Number(row.elapsedMs) / 1000 + sinceFetch
+  return Number(baseMs) / 1000 + sinceFetch
 }
 
 /** 索引真的在跑：状态是排队/索引中，且最近还有心跳 */
@@ -503,6 +507,7 @@ onBeforeUnmount(() => {
 
 /* 索引进度/时间：小字一行 */
 .status-time { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.status-file { margin: 2px 0 0; max-width: 235px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .index-progress { width: 150px; margin-top: 5px; }
 
 /* 索引失败原因：列表里一行省略，悬停看完整报错 */

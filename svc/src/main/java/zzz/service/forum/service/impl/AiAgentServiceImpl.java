@@ -7,15 +7,19 @@ import zzz.service.forum.ai.AiProvider;
 import zzz.service.forum.config.AiModelPresets;
 import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
+import zzz.service.forum.domain.AiKnowledgeSourceEntity;
 import zzz.service.forum.domain.dto.AiAgentRequest;
 import zzz.service.forum.domain.dto.AiModelListRequest;
 import zzz.service.forum.domain.dto.AiAgentProjectRef;
+import zzz.service.forum.domain.dto.AiAgentKnowledgeRef;
 import zzz.service.forum.domain.dto.AiModelListResponse;
 import zzz.service.forum.domain.dto.PageResult;
 import zzz.service.forum.mapper.AiAgentMapper;
 import zzz.service.forum.mapper.AiAgentProjectMapper;
+import zzz.service.forum.mapper.AiAgentKnowledgeMapper;
 import zzz.service.forum.service.AiAgentService;
 import zzz.service.forum.service.AiCodeProjectService;
+import zzz.service.forum.service.AiKnowledgeSourceService;
 import zzz.service.forum.utils.BaseBusinessException;
 import zzz.service.forum.utils.CryptoService;
 import zzz.service.forum.utils.SnowflakeIdGenerator;
@@ -62,6 +66,10 @@ public class AiAgentServiceImpl implements AiAgentService {
     private AiProvider aiProvider;
     @Resource
     private AiAgentProjectMapper agentProjectMapper;
+    @Resource
+    private AiAgentKnowledgeMapper agentKnowledgeMapper;
+    @Resource
+    private AiKnowledgeSourceService knowledgeSourceService;
 
     /**
      * 校验并规整关联项目：至少一个、都归当前用户、都已完成索引；去重且保持传入顺序。
@@ -78,13 +86,24 @@ public class AiAgentServiceImpl implements AiAgentService {
                 }
             }
         }
-        if (distinct.isEmpty()) {
-            throw new BaseBusinessException("请至少选择一个代码项目：角色必须由代码项目创建");
-        }
         for (Long projectId : distinct) {
             AiCodeProjectEntity project = aiCodeProjectService.getOwned(userId, projectId);
             if (!"READY".equals(project.getStatus())) {
                 throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
+            }
+        }
+        return distinct;
+    }
+
+    private List<Long> validateKnowledgeSources(Long userId, List<Long> knowledgeIds) {
+        List<Long> distinct = new ArrayList<>();
+        if (knowledgeIds != null) {
+            for (Long id : knowledgeIds) if (id != null && !distinct.contains(id)) distinct.add(id);
+        }
+        for (Long knowledgeId : distinct) {
+            AiKnowledgeSourceEntity source = knowledgeSourceService.getOwned(userId, knowledgeId);
+            if (!"READY".equals(source.getStatus())) {
+                throw new BaseBusinessException("知识库「" + source.getName() + "」尚未完成索引，请先在知识库页排队索引");
             }
         }
         return distinct;
@@ -122,6 +141,18 @@ public class AiAgentServiceImpl implements AiAgentService {
         }
     }
 
+    private void fillKnowledgeIds(List<AiAgentEntity> agents, Long userId) {
+        if (agents == null || agents.isEmpty()) return;
+        if (userId == null) {
+            for (AiAgentEntity agent : agents) if (agent != null) agent.setKnowledgeIds(agentKnowledgeMapper.listKnowledgeIds(agent.getId()));
+            return;
+        }
+        Map<Long, List<Long>> grouped = new HashMap<>();
+        List<AiAgentKnowledgeRef> refs = agentKnowledgeMapper.listRefsByUser(userId);
+        if (refs != null) for (AiAgentKnowledgeRef ref : refs) grouped.computeIfAbsent(ref.getAgentId(), k -> new ArrayList<>()).add(ref.getKnowledgeId());
+        for (AiAgentEntity agent : agents) if (agent != null) agent.setKnowledgeIds(grouped.getOrDefault(agent.getId(), new ArrayList<>()));
+    }
+
     @Override
     public AiAgentEntity getById(Long id) {
         if (id == null) {
@@ -129,6 +160,7 @@ public class AiAgentServiceImpl implements AiAgentService {
         }
         AiAgentEntity agent = aiAgentMapper.getById(id);
         fillProjectIds(Collections.singletonList(agent), null);
+        fillKnowledgeIds(Collections.singletonList(agent), null);
         return agent;
     }
 
@@ -140,6 +172,7 @@ public class AiAgentServiceImpl implements AiAgentService {
         List<AiAgentEntity> agents = aiAgentMapper.listByProjectId(projectId);
         // 走关联表查出来的角色同样要带上完整的项目列表（可能要显示"还关联了哪些项目"）
         fillProjectIds(agents, null);
+        fillKnowledgeIds(agents, null);
         return agents;
     }
 
@@ -147,6 +180,7 @@ public class AiAgentServiceImpl implements AiAgentService {
     public List<AiAgentEntity> listForUser(Long userId) {
         List<AiAgentEntity> agents = aiAgentMapper.listForUser(userId);
         fillProjectIds(agents, userId);
+        fillKnowledgeIds(agents, userId);
         return agents;
     }
 
@@ -157,6 +191,7 @@ public class AiAgentServiceImpl implements AiAgentService {
         long offset = (long) (safePage - 1) * safeSize;
         List<AiAgentEntity> agents = aiAgentMapper.pageForUser(userId, offset, safeSize);
         fillProjectIds(agents, null);
+        fillKnowledgeIds(agents, null);
         return new PageResult<>(agents, aiAgentMapper.countForUser(userId), safePage, safeSize);
     }
 
@@ -165,8 +200,12 @@ public class AiAgentServiceImpl implements AiAgentService {
         if (request.getName() == null || request.getName().trim().isEmpty()) {
             throw new BaseBusinessException("角色名称不能为空");
         }
-        // 业务规则一：角色必须关联至少一个代码项目，且项目归当前用户、已完成索引
+        // 角色至少关联一个代码项目或个人知识库，且来源归当前用户、已完成索引
         List<Long> projectIds = validateProjects(userId, request.getProjectIds());
+        List<Long> knowledgeIds = validateKnowledgeSources(userId, request.getKnowledgeIds());
+        if (projectIds.isEmpty() && knowledgeIds.isEmpty()) {
+            throw new BaseBusinessException("请至少选择一个代码项目或个人知识库");
+        }
         // 业务规则二：API Key 必填，没有 Key 的角色无法发起对话
         if (request.getApiKey() == null || request.getApiKey().trim().isEmpty()) {
             throw new BaseBusinessException("请填写 API Key：角色必须配置 API Key 才能发起对话");
@@ -191,8 +230,10 @@ public class AiAgentServiceImpl implements AiAgentService {
         entity.setCreatedat(now);
         entity.setUpdatedat(now);
         aiAgentMapper.insert(entity);
-        agentProjectMapper.insertBatch(entity.getId(), projectIds);
+        if (!projectIds.isEmpty()) agentProjectMapper.insertBatch(entity.getId(), projectIds);
+        if (!knowledgeIds.isEmpty()) agentKnowledgeMapper.insertBatch(entity.getId(), knowledgeIds);
         entity.setProjectIds(projectIds);
+        entity.setKnowledgeIds(knowledgeIds);
         return entity;
     }
 
@@ -212,6 +253,11 @@ public class AiAgentServiceImpl implements AiAgentService {
         // 关联项目整体替换：传了才动，没传（null）表示不改动关联
         List<Long> projectIds = request.getProjectIds() == null
                 ? null : validateProjects(userId, request.getProjectIds());
+        List<Long> knowledgeIds = request.getKnowledgeIds() == null
+                ? null : validateKnowledgeSources(userId, request.getKnowledgeIds());
+        if (projectIds != null && knowledgeIds != null && projectIds.isEmpty() && knowledgeIds.isEmpty()) {
+            throw new BaseBusinessException("请至少选择一个代码项目或个人知识库");
+        }
 
         AiAgentEntity entity = new AiAgentEntity();
         entity.setId(request.getId());
@@ -232,7 +278,11 @@ public class AiAgentServiceImpl implements AiAgentService {
         aiAgentMapper.update(entity);
         if (projectIds != null) {
             agentProjectMapper.deleteByAgent(request.getId());
-            agentProjectMapper.insertBatch(request.getId(), projectIds);
+            if (!projectIds.isEmpty()) agentProjectMapper.insertBatch(request.getId(), projectIds);
+        }
+        if (knowledgeIds != null) {
+            agentKnowledgeMapper.deleteByAgent(request.getId());
+            if (!knowledgeIds.isEmpty()) agentKnowledgeMapper.insertBatch(request.getId(), knowledgeIds);
         }
         return getById(request.getId());
     }

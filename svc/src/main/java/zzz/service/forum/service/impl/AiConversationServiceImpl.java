@@ -76,6 +76,15 @@ public class AiConversationServiceImpl implements AiConversationService {
     }
 
     @Override
+    public boolean bindAgent(Long conversationId, Long userId, Long agentId) {
+        AiConversationEntity conv = aiConversationMapper.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            return false;
+        }
+        return aiConversationMapper.bindAgent(conversationId, agentId, new Date()) > 0;
+    }
+
+    @Override
     public boolean delete(Long conversationId, Long userId) {
         AiConversationEntity conv = aiConversationMapper.getById(conversationId);
         if (conv == null || !conv.getUserid().equals(userId)) {

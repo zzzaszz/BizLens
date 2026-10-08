@@ -39,6 +39,14 @@ ai:
     api-key: ${AI_EMBEDDING_API_KEY:}
     model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
     dimension: ${AI_EMBEDDING_DIMENSION:1536}
+  index:
+    max-files: ${AI_INDEX_MAX_FILES:2000}
+    max-file-bytes: ${AI_INDEX_MAX_FILE_BYTES:2097152}
+  knowledge:
+    index:
+      max-files: ${AI_KNOWLEDGE_MAX_FILES:2000}
+      max-file-bytes: ${AI_KNOWLEDGE_MAX_FILE_BYTES:4194304}
+      max-chunk-chars: ${AI_KNOWLEDGE_MAX_CHUNK_CHARS:1500}
   # 模型下拉的兜底列表：仅当厂商 /models 调用失败（无 Key、Key 失效、网关不通）时才展示。
   # 模型名迭代很快，改名只需改这里、不需要重新编译；未列出的厂商不给兜底（下拉为空但可手输）。
   # 最近一次人工核对：2026-09-14

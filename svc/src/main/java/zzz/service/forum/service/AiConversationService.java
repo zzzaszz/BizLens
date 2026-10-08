@@ -24,6 +24,9 @@ public interface AiConversationService {
     /** 重新打开已关闭的会话，使其可继续对话（校验归属） */
     boolean reopen(Long conversationId, Long userId);
 
+    /** 为早期未绑定角色的会话补绑角色（校验归属） */
+    boolean bindAgent(Long conversationId, Long userId, Long agentId);
+
     /** 删除会话及其全部消息（校验归属） */
     boolean delete(Long conversationId, Long userId);
 }

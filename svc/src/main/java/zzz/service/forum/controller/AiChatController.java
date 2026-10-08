@@ -100,6 +100,31 @@ public class AiChatController {
         }
     }
 
+    /** 为早期未绑定角色的历史会话补绑角色，补绑后可继续对话 */
+    @PostMapping("/bindAgent")
+    public R<Boolean> bindAgent(@RequestBody Map<String, Object> body) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(aiService.bindConversationAgent(userId,
+                    parseConversationId(body.get("conversationId")), parseAgentId(body.get("agentId"))));
+        } catch (Exception e) {
+            logger.warn("bind conversation agent error", e);
+            return R.fail(e.getMessage());
+        }
+    }
+
+    private Long parseAgentId(Object raw) {
+        if (raw == null) {
+            throw new BaseBusinessException("角色ID不能为空");
+        }
+        try {
+            return Long.valueOf(String.valueOf(raw).trim());
+        } catch (NumberFormatException e) {
+            throw new BaseBusinessException("角色ID格式不正确");
+        }
+    }
+
     /** 发送消息（一次性返回） */
     @PostMapping("/send")
     public R<Map<String, Object>> send(@RequestBody AiSendRequest request) {

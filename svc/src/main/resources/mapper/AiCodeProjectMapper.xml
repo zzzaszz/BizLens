@@ -20,6 +20,8 @@
         <result column="index_total_files" property="indexTotalFiles"/>
         <result column="index_processed_files" property="indexProcessedFiles"/>
         <result column="index_skipped_files" property="indexSkippedFiles"/>
+        <result column="heartbeat_elapsed_ms" property="heartbeatElapsedMs"/>
+        <result column="index_current_file" property="indexCurrentFile"/>
         <result column="created_by" property="createdBy"/>
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
@@ -37,6 +39,8 @@
                 JOIN ai_code_document d ON d.id = c.document_id
                 WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
                p.index_total_files, p.index_processed_files, p.index_skipped_files,
+               round(extract(epoch from (now() - COALESCE(p.index_heartbeat_at, p.updated_at))) * 1000) AS heartbeat_elapsed_ms,
+               p.index_current_file,
                p.created_by, p.created_at, p.updated_at
         FROM ai_code_project p WHERE p.id = #{id}
     </select>
@@ -53,6 +57,8 @@
                 JOIN ai_code_document d ON d.id = c.document_id
                 WHERE d.project_id = p.id AND c.chunk_type != 'FILE') AS symbol_chunk_count,
                p.index_total_files, p.index_processed_files, p.index_skipped_files,
+               round(extract(epoch from (now() - COALESCE(p.index_heartbeat_at, p.updated_at))) * 1000) AS heartbeat_elapsed_ms,
+               p.index_current_file,
                p.created_by, p.created_at, p.updated_at
         FROM ai_code_project p
         WHERE p.created_by = #{userId}
@@ -95,7 +101,8 @@
     <!-- 状态流转（排队/索引中）时清掉上一轮的错误，避免旧错误挂在新的运行上 -->
     <update id="updateStatus">
         UPDATE ai_code_project
-        SET status = #{status}, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+        SET status = #{status}, last_error = NULL, index_heartbeat_at = CURRENT_TIMESTAMP,
+            index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
 
@@ -103,14 +110,16 @@
         UPDATE ai_code_project
         SET status = 'INDEXING', last_error = NULL,
             index_total_files = #{totalFiles}, index_processed_files = 0,
-            index_skipped_files = 0, updated_at = CURRENT_TIMESTAMP
+            index_skipped_files = 0, index_current_file = NULL,
+            index_heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
 
     <update id="updateIndexProgress">
         UPDATE ai_code_project
         SET index_processed_files = #{processedFiles},
-            index_skipped_files = #{skippedFiles}, updated_at = CURRENT_TIMESTAMP
+            index_skipped_files = #{skippedFiles}, index_current_file = #{currentFile},
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
 
@@ -119,24 +128,25 @@
         UPDATE ai_code_project
         SET status = #{status}, git_commit = #{gitCommit}, last_error = NULL,
             last_indexed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
-            last_index_ms = #{durationMs}
+            last_index_ms = #{durationMs}, index_heartbeat_at = NULL, index_current_file = NULL
         WHERE id = #{id}
     </update>
 
     <!-- 索引失败：状态与原因一起写入，前端据此展示可排查的提示 -->
     <update id="markFailed">
         UPDATE ai_code_project
-        SET status = 'FAILED', last_error = #{error}, updated_at = CURRENT_TIMESTAMP
+        SET status = 'FAILED', last_error = #{error}, index_heartbeat_at = NULL,
+            index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
     </update>
 
     <!--
-      索引过程中的心跳：只推进 updated_at，不动状态与错误信息。
+      索引过程中的心跳：只推进独立心跳字段，不动状态、普通更新时间与错误信息。
       有它才能判断"这个 INDEXING 是真在跑还是进程已经没了"——
       没有心跳就只能靠一个很宽的时间窗猜，窗口内用户看到的是假的"索引中"。
     -->
     <update id="touchIndexHeartbeat">
-        UPDATE ai_code_project SET updated_at = CURRENT_TIMESTAMP WHERE id = #{id}
+        UPDATE ai_code_project SET index_heartbeat_at = CURRENT_TIMESTAMP WHERE id = #{id}
     </update>
 
     <!--
@@ -147,9 +157,10 @@
     -->
     <update id="resetStuckIndexing">
         UPDATE ai_code_project
-        SET status = 'FAILED', last_error = #{reason}, updated_at = CURRENT_TIMESTAMP
+        SET status = 'FAILED', last_error = #{reason}, index_heartbeat_at = NULL,
+            index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE status IN ('QUEUED', 'INDEXING')
-          AND updated_at &lt; CURRENT_TIMESTAMP - (#{graceSeconds} * interval '1 second')
+          AND COALESCE(index_heartbeat_at, updated_at) &lt; CURRENT_TIMESTAMP - (#{graceSeconds} * interval '1 second')
     </update>
 
     <delete id="delete">DELETE FROM ai_code_project WHERE id = #{id}</delete>

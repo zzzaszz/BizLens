@@ -47,6 +47,11 @@
             <span>代码项目</span>
           </el-menu-item>
 
+          <el-menu-item index="/knowledge">
+            <el-icon><Collection /></el-icon>
+            <span>个人知识库</span>
+          </el-menu-item>
+
         </el-menu>
       </el-scrollbar>
 
@@ -114,6 +119,7 @@ import {ElMessage} from 'element-plus'
 import {
   ArrowDown,
   ChatDotRound,
+  Collection,
   Cpu,
   Expand,
   Fold,
@@ -173,6 +179,7 @@ const currentMenu = computed(() => {
     '/ai': '业务问答',
     '/ai/agents': 'AI 角色',
     '/projects': '代码项目',
+    '/knowledge': '个人知识库',
   }
   return pathMap[path] || ''
 })

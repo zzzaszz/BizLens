@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiKnowledgeSourceMapper">
+    <resultMap id="sourceMap" type="zzz.service.forum.domain.AiKnowledgeSourceEntity">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="git_url" property="gitUrl"/>
+        <result column="git_branch" property="gitBranch"/>
+        <result column="git_commit" property="gitCommit"/>
+        <result column="root_path" property="rootPath"/>
+        <result column="credential_enc" property="credentialEnc"/>
+        <result column="credential_user" property="credentialUser"/>
+        <result column="status" property="status"/>
+        <result column="last_error" property="lastError"/>
+        <result column="last_indexed_at" property="lastIndexedAt"/>
+        <result column="last_index_ms" property="lastIndexMs"/>
+        <result column="elapsed_ms" property="elapsedMs"/>
+        <result column="document_count" property="documentCount"/>
+        <result column="chunk_count" property="chunkCount"/>
+        <result column="index_total_files" property="indexTotalFiles"/>
+        <result column="index_processed_files" property="indexProcessedFiles"/>
+        <result column="index_skipped_files" property="indexSkippedFiles"/>
+        <result column="heartbeat_elapsed_ms" property="heartbeatElapsedMs"/>
+        <result column="index_current_file" property="indexCurrentFile"/>
+        <result column="created_by" property="createdBy"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="columns">
+        s.id, s.name, s.source_type, s.git_url, s.git_branch, s.git_commit, s.root_path,
+        s.credential_enc, s.credential_user, s.status, s.last_error, s.last_indexed_at, s.last_index_ms,
+        round(extract(epoch from (now() - s.updated_at)) * 1000) AS elapsed_ms,
+        (SELECT COUNT(*) FROM ai_knowledge_document d WHERE d.source_id = s.id) AS document_count,
+        (SELECT COUNT(*) FROM ai_knowledge_chunk c
+         JOIN ai_knowledge_document d ON d.id = c.document_id
+         WHERE d.source_id = s.id) AS chunk_count,
+        s.index_total_files, s.index_processed_files, s.index_skipped_files,
+        round(extract(epoch from (now() - COALESCE(s.index_heartbeat_at, s.updated_at))) * 1000) AS heartbeat_elapsed_ms,
+        s.index_current_file,
+        s.created_by, s.created_at, s.updated_at
+    </sql>
+
+    <select id="getById" resultMap="sourceMap">
+        SELECT <include refid="columns"/>
+        FROM ai_knowledge_source s WHERE s.id = #{id}
+    </select>
+
+    <sql id="userListQuery">
+        SELECT <include refid="columns"/>
+        FROM ai_knowledge_source s
+        WHERE s.created_by = #{userId}
+    </sql>
+
+    <select id="listByUser" resultMap="sourceMap">
+        <include refid="userListQuery"/>
+        ORDER BY s.updated_at DESC, s.id DESC
+    </select>
+
+    <select id="pageByUser" resultMap="sourceMap">
+        <include refid="userListQuery"/>
+        ORDER BY s.updated_at DESC, s.id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="long">
+        SELECT COUNT(*) FROM ai_knowledge_source WHERE created_by = #{userId}
+    </select>
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiKnowledgeSourceEntity">
+        INSERT INTO ai_knowledge_source
+        (id, name, source_type, git_url, git_branch, root_path, credential_enc, credential_user,
+         status, created_by, created_at, updated_at)
+        VALUES (#{id}, #{name}, #{sourceType}, #{gitUrl}, #{gitBranch}, #{rootPath}, #{credentialEnc}, #{credentialUser},
+                #{status}, #{createdBy}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="update" parameterType="zzz.service.forum.domain.AiKnowledgeSourceEntity">
+        UPDATE ai_knowledge_source
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="gitUrl != null">git_url = #{gitUrl},</if>
+            <if test="gitBranch != null">git_branch = #{gitBranch},</if>
+            <if test="rootPath != null">root_path = #{rootPath},</if>
+            <if test="credentialEnc != null">credential_enc = #{credentialEnc},</if>
+            <if test="credentialUser != null">credential_user = #{credentialUser},</if>
+            updated_at = CURRENT_TIMESTAMP
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE ai_knowledge_source
+        SET status = #{status}, last_error = NULL, updated_at = CURRENT_TIMESTAMP,
+            index_heartbeat_at = CURRENT_TIMESTAMP, index_current_file = NULL
+        WHERE id = #{id}
+    </update>
+
+    <update id="startIndex">
+        UPDATE ai_knowledge_source
+        SET status = 'INDEXING', last_error = NULL,
+            index_total_files = #{totalFiles}, index_processed_files = 0,
+            index_skipped_files = 0, index_current_file = NULL,
+            index_heartbeat_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateIndexProgress">
+        UPDATE ai_knowledge_source
+        SET index_processed_files = #{processedFiles},
+            index_skipped_files = #{skippedFiles}, index_current_file = #{currentFile},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="markIndexed">
+        UPDATE ai_knowledge_source
+        SET status = #{status}, git_commit = #{gitCommit}, last_error = NULL,
+            last_indexed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+            last_index_ms = #{durationMs}, index_heartbeat_at = NULL, index_current_file = NULL
+        WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE ai_knowledge_source
+        SET status = 'FAILED', last_error = #{error}, index_heartbeat_at = NULL,
+            index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <update id="touchIndexHeartbeat">
+        UPDATE ai_knowledge_source SET index_heartbeat_at = CURRENT_TIMESTAMP WHERE id = #{id}
+    </update>
+
+    <update id="resetStuckIndexing">
+        UPDATE ai_knowledge_source
+        SET status = 'FAILED', last_error = #{reason}, index_heartbeat_at = NULL,
+            index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE status IN ('QUEUED', 'INDEXING')
+          AND COALESCE(index_heartbeat_at, updated_at) &lt; CURRENT_TIMESTAMP - (#{graceSeconds} * interval '1 second')
+    </update>
+
+    <delete id="delete">DELETE FROM ai_knowledge_source WHERE id = #{id}</delete>
+</mapper>

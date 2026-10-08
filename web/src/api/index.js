@@ -43,6 +43,11 @@ export function aiReopenConversation(data) {
   return request({url: '/ai/chat/reopen', method: 'post', data})
 }
 
+/** 为早期未绑定角色的历史会话补绑角色 */
+export function aiBindConversationAgent(data) {
+  return request({url: '/ai/chat/bindAgent', method: 'post', data})
+}
+
 export function aiSend(data) {
   return request({url: '/ai/chat/send', method: 'post', data})
 }
@@ -107,4 +112,29 @@ export function codeProjectQueueIndexAll() {
 
 export function codeProjectDelete(id) {
   return request({url: `/ai/project/${id}`, method: 'delete'})
+}
+
+// ============ 个人知识库 ============
+export function knowledgeSourceList(params) {
+  return request({url: '/ai/knowledge/list', method: 'get', params})
+}
+
+export function knowledgeSourceCreate(data) {
+  return request({url: '/ai/knowledge/create', method: 'post', data})
+}
+
+export function knowledgeSourceUpdate(data) {
+  return request({url: '/ai/knowledge/update', method: 'post', data})
+}
+
+export function knowledgeSourceQueueIndex(id) {
+  return request({url: `/ai/knowledge/${id}/index`, method: 'post'})
+}
+
+export function knowledgeSourceQueueIndexAll() {
+  return request({url: '/ai/knowledge/indexAll', method: 'post'})
+}
+
+export function knowledgeSourceDelete(id) {
+  return request({url: `/ai/knowledge/${id}`, method: 'delete'})
 }

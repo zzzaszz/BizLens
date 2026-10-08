@@ -29,6 +29,9 @@ export default { name: 'AiChat' }
             <span>{{ c.agentid ? agentName(c.agentid) : '未绑定角色' }}</span>
             <span class="conv-time">{{ fmtTime(c.updatedat) }}</span>
           </div>
+          <div v-if="c.agentid" class="conv-projects" :title="projectSummary(c.agentid)">
+            {{ projectSummary(c.agentid) }}
+          </div>
         </div>
         <el-empty v-if="!visibleConversations.length" description="暂无会话" :image-size="48" />
       </div>
@@ -44,6 +47,14 @@ export default { name: 'AiChat' }
           <div class="header-left">
             <h2>{{ current.title }}</h2>
             <el-tag v-if="current.agentid" size="small" effect="light">{{ agentName(current.agentid) }}</el-tag>
+            <el-tag
+              v-for="name in projectNames(current.agentid)"
+              :key="name"
+              size="small"
+              type="success"
+              effect="plain"
+              class="project-tag"
+            >{{ name }}</el-tag>
             <el-tag v-if="current.status !== 1" size="small" type="info" effect="plain">已关闭</el-tag>
           </div>
           <el-button link size="small" type="danger" :icon="Close" @click="closeConversation">关闭会话</el-button>
@@ -87,9 +98,15 @@ export default { name: 'AiChat' }
         </div>
 
         <!-- 未绑定角色的会话（早期数据）没有知识库可依托，续聊必定失败，不能给它"能继续"的假承诺 -->
-        <p v-if="!canContinue" class="closed-tip closed-tip--blocked">
-          该会话未绑定 AI 角色，只能查看历史，无法继续对话。请在「代码项目」登记项目并完成索引后，用它创建角色再新建会话
-        </p>
+        <div v-if="!canContinue" class="closed-tip closed-tip--blocked bind-agent-bar">
+          <span>该会话未绑定 AI 角色，只能查看历史。选择一个已就绪角色后可继续对话。</span>
+          <el-select v-model="bindAgentId" size="small" placeholder="选择角色" class="bind-agent-select">
+            <el-option v-for="a in bindableAgents" :key="a.id" :label="agentOptionLabel(a)" :value="a.id" />
+          </el-select>
+          <el-button size="small" type="primary" :loading="bindingAgent" :disabled="!bindAgentId" @click="bindConversationAgent">
+            绑定角色
+          </el-button>
+        </div>
         <p v-else-if="current.status !== 1" class="closed-tip">
           该会话已关闭，发送消息会自动重新打开并继续这段对话
         </p>
@@ -123,11 +140,12 @@ export default { name: 'AiChat' }
       <el-form label-width="70px">
         <el-form-item label="角色" required>
           <el-select v-model="createForm.agentId" placeholder="选择 AI 角色" style="width:100%">
-            <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id" :disabled="!a.apikeyenc">
+            <el-option v-for="a in agents" :key="a.id" :label="agentOptionLabel(a)" :value="a.id" :disabled="!a.apikeyenc">
               <span>{{ a.name }}</span>
               <span v-if="!a.apikeyenc" class="opt-meta">未配置 API Key</span>
             </el-option>
           </el-select>
+          <p v-if="createForm.agentId" class="dialog-tip">覆盖项目：{{ projectSummary(createForm.agentId) }}</p>
           <p v-if="!agents.length" class="dialog-tip">
             还没有可用角色。请先在「代码项目」登记项目并完成索引，再为它创建角色。
           </p>
@@ -159,10 +177,12 @@ import {
   aiConversations,
   aiCloseConversation,
   aiReopenConversation,
+  aiBindConversationAgent,
   aiHistory,
   aiAgentList,
   aiDeleteMessage,
-  aiDeleteConversation
+  aiDeleteConversation,
+  codeProjectList
 } from '@/api'
 
 const route = useRoute()
@@ -175,11 +195,14 @@ const conversationPage = ref(1)
 const conversationTotal = ref(0)
 const CONVERSATION_PAGE_SIZE = 20
 const agents = ref([])
+const projects = ref([])
 const current = ref(null)
 const sending = ref(false)
 const creating = ref(false)
+const bindingAgent = ref(false)
 const createVisible = ref(false)
 const createForm = ref({ title: '', agentId: null })
+const bindAgentId = ref(null)
 /** 会话历史筛选：默认只看进行中，历史/已关闭按需切过去 */
 const scope = ref('open')
 
@@ -193,6 +216,8 @@ const visibleConversations = computed(() => {
   return conversations.value
 })
 
+const bindableAgents = computed(() => agents.value.filter(a => !!a.apikeyenc && projectNames(a.id).length > 0))
+
 /** 能否继续对话：会话必须绑定了角色（未绑定的早期会话只有历史，没有知识库可依托） */
 const canContinue = computed(() => !!(current.value && current.value.agentid))
 
@@ -201,8 +226,31 @@ const myNickname = (() => {
 })()
 
 function agentName(agentId) {
-  const a = agents.value.find(x => x.id === agentId)
+  const a = agentOf(agentId)
   return a ? a.name : 'AI'
+}
+
+function agentOf(agentId) {
+  return agents.value.find(x => String(x.id) === String(agentId))
+}
+
+function projectName(projectId) {
+  const p = projects.value.find(x => String(x.id) === String(projectId))
+  return p ? p.name : '未知项目'
+}
+
+function projectNames(agentId) {
+  const a = agentOf(agentId)
+  return a && a.projectIds && a.projectIds.length ? a.projectIds.map(projectName) : []
+}
+
+function projectSummary(agentId) {
+  const names = projectNames(agentId)
+  return names.length ? names.join('、') : '未关联项目'
+}
+
+function agentOptionLabel(agent) {
+  return `${agent.name} · ${projectSummary(agent.id)}`
 }
 
 function fmtTime(t) {
@@ -238,8 +286,16 @@ async function loadAgents() {
   } catch { /* 忽略 */ }
 }
 
+async function loadProjects() {
+  try {
+    const res = await codeProjectList()
+    if (res.code === 200) projects.value = res.data || []
+  } catch { /* 忽略 */ }
+}
+
 async function openConversation(c) {
   current.value = c
+  bindAgentId.value = null
   messages.value = []
   try {
     const res = await aiHistory(c.id)
@@ -293,6 +349,28 @@ async function closeConversation() {
   current.value = null
   messages.value = []
   await loadConversations()
+}
+
+async function bindConversationAgent() {
+  if (!current.value || !bindAgentId.value || bindingAgent.value) return
+  bindingAgent.value = true
+  try {
+    const res = await aiBindConversationAgent({ conversationId: current.value.id, agentId: bindAgentId.value })
+    if (res.code !== 200) {
+      ElMessage.error(res.msg || '绑定失败')
+      return
+    }
+    current.value.agentid = bindAgentId.value
+    const inList = conversations.value.find(c => String(c.id) === String(current.value.id))
+    if (inList) inList.agentid = bindAgentId.value
+    bindAgentId.value = null
+    ElMessage.success('角色已绑定，可以继续对话')
+    await loadConversations()
+  } catch {
+    ElMessage.error('绑定失败')
+  } finally {
+    bindingAgent.value = false
+  }
 }
 
 async function sendMsg() {
@@ -522,7 +600,9 @@ async function removeConversation() {
       current.value = null
       messages.value = []
     }
-    await loadConversations()
+    const nextPage = visibleConversations.value.length <= 1 && conversationPage.value > 1
+      ? conversationPage.value - 1 : conversationPage.value
+    await loadConversations(nextPage)
   } catch {
     ElMessage.error('删除失败')
   }
@@ -531,7 +611,7 @@ async function removeConversation() {
 onMounted(async () => {
   // 点页面任意处收起右键菜单
   window.addEventListener('click', closeMenu)
-  await Promise.all([loadAgents(), loadConversations()])
+  await Promise.all([loadAgents(), loadProjects(), loadConversations()])
   // 从「AI 角色」页点「对话」跳过来时带着 conversationId，直接把这条会话打开，
   // 否则用户落到一个什么都不选中的空页面上，看起来像没反应
   const targetId = route.query.conversationId
@@ -583,6 +663,10 @@ onBeforeUnmount(() => {
 .conv-title .el-tag { flex-shrink: 0; }
 .conv-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .conv-time { flex-shrink: 0; }
+.conv-projects {
+  margin-top: 3px; font-size: 11px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ====== 主区域 ====== */
 .ai-main {
@@ -594,8 +678,10 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px; border-bottom: 1px solid var(--border-light); flex-shrink: 0;
 }
-.header-left { display: flex; align-items: center; gap: 8px; }
+.header-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .ai-header h2 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.project-tag { max-width: 180px; }
+.project-tag :deep(.el-tag__content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ai-messages {
   flex: 1; overflow-y: auto; padding: 16px;
@@ -661,6 +747,9 @@ onBeforeUnmount(() => {
   background: rgba(230, 162, 60, .08); border-top: 1px solid var(--border-light);
 }
 .closed-tip--blocked { color: var(--text-secondary); background: var(--bg-light); }
+.bind-agent-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bind-agent-bar > span { flex: 1; min-width: 220px; }
+.bind-agent-select { width: 260px; max-width: 100%; }
 
 /* 空态 */
 .ai-empty {
@@ -682,6 +771,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .ai-sidebar { width: 160px; }
+  .bind-agent-select { width: 100%; }
 }
 </style>
 

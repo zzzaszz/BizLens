@@ -8,6 +8,7 @@ import zzz.service.forum.ai.*;
 import zzz.service.forum.domain.AiAgentEntity;
 import zzz.service.forum.domain.AiChatMessageEntity;
 import zzz.service.forum.domain.AiCodeProjectEntity;
+import zzz.service.forum.domain.AiKnowledgeSourceEntity;
 import zzz.service.forum.domain.AiConversationEntity;
 import zzz.service.forum.domain.dto.AiCodeChunkHit;
 import zzz.service.forum.domain.dto.AiCreateConversationRequest;
@@ -115,6 +116,8 @@ public class AiServiceImpl implements AiService {
     @Resource
     private AiCodeProjectService aiCodeProjectService;
     @Resource
+    private zzz.service.forum.service.AiKnowledgeSourceService aiKnowledgeSourceService;
+    @Resource
     private AiProvider aiProvider;
     @Resource
     private RedisService redisService;
@@ -179,6 +182,29 @@ public class AiServiceImpl implements AiService {
         AiAgentEntity agent = requireAgent(conv);
         ensureChatReady(agent, buildAiRequest(agent, new ArrayList<>()));
         return aiConversationService.reopen(conversationId, userId);
+    }
+
+    @Override
+    public boolean bindConversationAgent(Long userId, Long conversationId, Long agentId) {
+        if (agentId == null) {
+            throw new BaseBusinessException("请选择 AI 角色");
+        }
+        AiConversationEntity conv = aiConversationService.getById(conversationId);
+        if (conv == null || !conv.getUserid().equals(userId)) {
+            throw new BaseBusinessException("会话不存在或无权访问");
+        }
+        if (conv.getAgentid() != null) {
+            throw new BaseBusinessException("该会话已绑定 AI 角色，无需重复绑定");
+        }
+        AiAgentEntity agent = aiAgentService.getById(agentId);
+        if (agent == null) {
+            throw new BaseBusinessException("AI 角色不存在或已删除");
+        }
+        if (!userId.equals(agent.getUserid())) {
+            throw new BaseBusinessException("无权使用他人创建的角色");
+        }
+        ensureChatReady(agent, buildAiRequest(agent, new ArrayList<>()));
+        return aiConversationService.bindAgent(conversationId, userId, agentId);
     }
 
     @Override
@@ -452,7 +478,21 @@ public class AiServiceImpl implements AiService {
             }
             names.append(project.getName());
         }
-        String projectLabel = names.toString();
+        String projectLabel = names.length() == 0 ? "无代码项目" : names.toString();
+
+        List<Long> knowledgeIds = agent.getKnowledgeIds();
+        List<AiKnowledgeSourceEntity> knowledgeSources = new ArrayList<>();
+        StringBuilder knowledgeNames = new StringBuilder();
+        if (knowledgeIds != null) {
+            for (Long knowledgeId : knowledgeIds) {
+                AiKnowledgeSourceEntity source = aiKnowledgeSourceService.getById(knowledgeId);
+                if (source != null) {
+                    knowledgeSources.add(source);
+                    if (knowledgeNames.length() > 0) knowledgeNames.append('、');
+                    knowledgeNames.append(source.getName());
+                }
+            }
+        }
 
         // 知识库召回：把关联项目内相关源码片段喂给模型，让它能真正回答业务问题
         List<AiChatMessageEntity> recentHistory = aiChatMessageService.loadHistoryCached(conv.getId(), CONTEXT_RECENT);
@@ -461,9 +501,18 @@ public class AiServiceImpl implements AiService {
                 projectIds, retrievalQuestion, agent.getModel(),
                 aiRequest.getApiKey(), agent.getApibaseurl(), agent.getProvider());
         String context = aiCodeRetrievalService.buildContext(hits);
-        messages.add(AiMessage.system(context != null
-                ? String.format(KNOWLEDGE_PREFIX, projectLabel) + context
-                : String.format(NO_KNOWLEDGE_HINT, projectLabel)));
+        List<Long> knowledgeSourceIds = new ArrayList<>();
+        for (AiKnowledgeSourceEntity source : knowledgeSources) knowledgeSourceIds.add(source.getId());
+        List<zzz.service.forum.domain.dto.AiKnowledgeChunkHit> knowledgeHits = aiCodeRetrievalService.retrieveKnowledge(
+                knowledgeSourceIds, retrievalQuestion, agent.getModel(), aiRequest.getApiKey(),
+                agent.getApibaseurl(), agent.getProvider());
+        String knowledgeContext = aiCodeRetrievalService.buildKnowledgeContext(knowledgeHits);
+        StringBuilder retrievalContext = new StringBuilder();
+        if (context != null) retrievalContext.append("\n【代码片段】\n").append(context);
+        if (knowledgeContext != null) retrievalContext.append("\n【个人知识库片段】\n").append(knowledgeContext);
+        messages.add(AiMessage.system(retrievalContext.length() > 0
+                ? String.format(KNOWLEDGE_PREFIX, projectLabel + (knowledgeNames.length() > 0 ? "；个人知识库：" + knowledgeNames : "")) + retrievalContext
+                : String.format(NO_KNOWLEDGE_HINT, projectLabel + (knowledgeNames.length() > 0 ? "；个人知识库：" + knowledgeNames : ""))));
 
         for (AiChatMessageEntity h : recentHistory) {
             messages.add("AI".equalsIgnoreCase(h.getSendertype())
@@ -571,10 +620,14 @@ public class AiServiceImpl implements AiService {
             throw new BaseBusinessException("请先为角色配置 API Key");
         }
         List<Long> projectIds = agent.getProjectIds();
-        if (projectIds == null || projectIds.isEmpty()) {
-            throw new BaseBusinessException("角色未关联代码项目：请先在「AI 角色」页为它关联至少一个项目");
+        List<Long> knowledgeIds = agent.getKnowledgeIds();
+        if ((projectIds == null || projectIds.isEmpty()) && (knowledgeIds == null || knowledgeIds.isEmpty())) {
+            throw new BaseBusinessException("角色未关联任何知识来源：请先在「AI 角色」页关联代码项目或个人知识库");
         }
         List<AiCodeProjectEntity> projects = new ArrayList<>();
+        if (projectIds == null) {
+            projectIds = new ArrayList<>();
+        }
         for (Long projectId : projectIds) {
             AiCodeProjectEntity project = aiCodeProjectService.getById(projectId);
             if (project == null) {
@@ -584,6 +637,15 @@ public class AiServiceImpl implements AiService {
                 throw new BaseBusinessException("项目「" + project.getName() + "」尚未完成索引，请先在代码项目页排队索引");
             }
             projects.add(project);
+        }
+        if (knowledgeIds != null) {
+            for (Long knowledgeId : knowledgeIds) {
+                AiKnowledgeSourceEntity source = aiKnowledgeSourceService.getById(knowledgeId);
+                if (source == null) throw new BaseBusinessException("角色关联的个人知识库不存在或已删除，请重新关联");
+                if (!"READY".equals(source.getStatus())) {
+                    throw new BaseBusinessException("知识库「" + source.getName() + "」尚未完成索引，请先在知识库页排队索引");
+                }
+            }
         }
         return projects;
     }

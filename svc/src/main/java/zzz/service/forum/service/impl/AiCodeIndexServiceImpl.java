@@ -3,6 +3,7 @@ package zzz.service.forum.service.impl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import zzz.service.forum.domain.AiCodeChunkEntity;
 import zzz.service.forum.domain.AiCodeDocumentEntity;
@@ -56,8 +57,8 @@ import java.util.concurrent.TimeUnit;
 public class AiCodeIndexServiceImpl implements AiCodeIndexService {
 
     private static final Logger log = LoggerFactory.getLogger(AiCodeIndexServiceImpl.class);
-    private static final int MAX_FILES = 2000;
-    private static final long MAX_FILE_BYTES = 2 * 1024 * 1024L;
+    private static final int DEFAULT_MAX_FILES = 2000;
+    private static final long DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024L;
     private static final int MAX_SYMBOLS_PER_FILE = 2000;
     /** 索引工作区目录前缀（克隆下来的代码放这里，用完删） */
     private static final String INDEX_WORK_PREFIX = "bizlens-index-";
@@ -110,6 +111,10 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private CryptoService cryptoService;
     @Resource
     private AiEmbeddingProvider embeddingProvider;
+    @Value("${ai.index.max-files:2000}")
+    private int configuredMaxFiles;
+    @Value("${ai.index.max-file-bytes:2097152}")
+    private long configuredMaxFileBytes;
     private final CodeSymbolExtractor symbolExtractor = new CodeSymbolExtractor();
     private final CodeSecretScanner secretScanner = new CodeSecretScanner();
     private volatile boolean vectorPersistenceDisabled;
@@ -156,6 +161,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             project = projectMapper.getById(projectId);
             if (project == null) return;
             // 心跳：让"这个 INDEXING 是真在跑还是进程已经没了"可判断（见 HEARTBEAT_* 常量）
+            projectMapper.touchIndexHeartbeat(projectId);
             heartbeat = startHeartbeat(projectId);
             validateGitUrl(project.getGitUrl());
             workspace = Files.createTempDirectory(INDEX_WORK_PREFIX);
@@ -177,14 +183,19 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             projectMapper.startIndex(projectId, totalFiles);
             IndexCounter counter = new IndexCounter();
             final Path root = workspace;
+            final int maxFiles = maxFiles();
+            final long maxFileBytes = maxFileBytes();
+            log.info("code project index limits, projectId={}, maxFiles={}, maxFileBytes={}",
+                    projectId, maxFiles, maxFileBytes);
             Files.walkFileTree(workspace, new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                     if (!isIndexable(file) || isIgnored(root, file)) return FileVisitResult.CONTINUE;
                     counter.processed++;
-                    if (counter.processed > MAX_FILES || attrs.size() > MAX_FILE_BYTES) {
+                    String currentFile = root.relativize(file).toString().replace('\\', '/');
+                    updateProgress(projectId, counter, totalFiles, currentFile);
+                    if (counter.processed > maxFiles || attrs.size() > maxFileBytes) {
                         counter.skipped++;
-                        updateProgress(projectId, counter, totalFiles);
                         return FileVisitResult.CONTINUE;
                     }
                     try {
@@ -194,7 +205,6 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
                         counter.skipped++;
                         log.warn("skip code file {}: {}", file, e.getMessage());
                     }
-                    updateProgress(projectId, counter, totalFiles);
                     return FileVisitResult.CONTINUE;
                 }
             });
@@ -234,14 +244,20 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
         return total[0];
     }
 
-    private void updateProgress(Long projectId, IndexCounter counter, int totalFiles) {
-        // 每 10 个文件写一次，最后一个文件始终写入，减少大仓库的数据库写放大。
-        if (counter.processed == totalFiles || counter.processed % 10 == 0) {
-            try {
-                projectMapper.updateIndexProgress(projectId, counter.processed, counter.skipped);
-            } catch (Exception e) {
-                log.debug("索引进度写入失败: {}", e.getMessage());
-            }
+    private int maxFiles() {
+        return configuredMaxFiles > 0 ? configuredMaxFiles : DEFAULT_MAX_FILES;
+    }
+
+    private long maxFileBytes() {
+        return configuredMaxFileBytes > 0 ? configuredMaxFileBytes : DEFAULT_MAX_FILE_BYTES;
+    }
+
+    private void updateProgress(Long projectId, IndexCounter counter, int totalFiles, String currentFile) {
+        try {
+            // 每个文件都写当前路径，页面才能知道大仓库索引卡在哪个文件；心跳本身仍由定时任务负责。
+            projectMapper.updateIndexProgress(projectId, counter.processed, counter.skipped, currentFile);
+        } catch (Exception e) {
+            log.debug("索引进度写入失败: {}", e.getMessage());
         }
     }
 

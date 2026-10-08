@@ -7,9 +7,9 @@ export default { name: 'AiAgentManage' }
     <div class="page-head">
       <div>
         <h2>AI 角色</h2>
-        <p>角色关联一个或多个代码项目（前后端可共用一个角色），且必须配置 API Key 才能发起对话</p>
+        <p>角色可关联代码项目、个人知识库，或同时关联两类来源；必须配置 API Key 才能发起对话</p>
       </div>
-      <el-button type="primary" :icon="Plus" :disabled="!creatableProjects.length" @click="openCreate">
+      <el-button type="primary" :icon="Plus" :disabled="!canCreateAgent" @click="openCreate">
         {{ createButtonText }}
       </el-button>
     </div>
@@ -18,7 +18,7 @@ export default { name: 'AiAgentManage' }
       v-loading="loading"
       :data="agents"
       border
-      empty-text="暂无角色。请先在「代码项目」登记项目，再回到此处为项目创建角色"
+      empty-text="暂无角色。请先准备一个已就绪的代码项目或个人知识库，再回到此处创建角色"
     >
       <el-table-column label="角色" min-width="200">
         <template #default="{ row }">
@@ -28,9 +28,9 @@ export default { name: 'AiAgentManage' }
           </div>
         </template>
       </el-table-column>
-      <!-- 一个角色可以关联多个项目（例如前后端共用一个角色） -->
-      <el-table-column label="关联项目" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">{{ projectNames(row.projectIds) }}</template>
+      <!-- 一个角色可以同时关联多个代码项目和个人知识库 -->
+      <el-table-column label="关联来源" min-width="260" show-overflow-tooltip>
+        <template #default="{ row }">{{ sourceNames(row) }}</template>
       </el-table-column>
       <el-table-column label="模型" width="150">
         <template #default="{ row }">{{ row.model || '默认' }}</template>
@@ -58,7 +58,7 @@ export default { name: 'AiAgentManage' }
     <!-- 创建 / 编辑角色弹窗；align-center 让弹窗垂直居中 -->
     <el-dialog v-model="formVisible" :title="form.id ? '编辑角色' : '新建角色'" width="540px" align-center :append-to-body="true">
       <el-form label-width="90px">
-        <el-form-item label="关联项目" required>
+        <el-form-item label="代码项目">
           <el-select v-model="form.projectIds" multiple collapse-tags collapse-tags-tooltip
             placeholder="可多选：一个角色可以覆盖多个项目（如前端 + 后端）" style="width:100%">
             <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id"
@@ -68,9 +68,26 @@ export default { name: 'AiAgentManage' }
             </el-option>
           </el-select>
           <p class="dialog-tip-inline">
-            角色会在所选的<b>全部项目</b>里检索知识库，所以项目必须都已完成索引。
+            角色会在所选的<b>全部代码项目</b>里检索，所以项目必须都已完成索引。
             <template v-if="projects.some(p => p.status !== 'READY')">
               灰显的项目尚未完成索引，请先在「代码项目」页排队索引。
+            </template>
+          </p>
+        </el-form-item>
+
+        <el-form-item label="个人知识库">
+          <el-select v-model="form.knowledgeIds" multiple collapse-tags collapse-tags-tooltip
+            placeholder="可多选：选择已完成索引的 Git Markdown 知识库" style="width:100%">
+            <el-option v-for="source in knowledgeSources" :key="source.id" :label="source.name" :value="source.id"
+              :disabled="source.status !== 'READY'">
+              <span>{{ source.name }}</span>
+              <span class="opt-meta">{{ sourceStatusText(source.status) }}</span>
+            </el-option>
+          </el-select>
+          <p class="dialog-tip-inline">
+            角色可只关联个人知识库，也可与代码项目一起检索；所选知识库必须已完成索引。
+            <template v-if="knowledgeSources.some(source => source.status !== 'READY')">
+              灰显的知识库尚未完成索引，请先在「个人知识库」页排队索引。
             </template>
           </p>
         </el-form-item>
@@ -177,7 +194,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, QuestionFilled } from '@element-plus/icons-vue'
 import {
   aiAgentList, aiAgentCreate, aiAgentUpdate, aiAgentDelete, aiAgentModels,
-  aiCreateConversation, aiConversations, codeProjectList
+  aiCreateConversation, aiConversations, codeProjectList, knowledgeSourceList
 } from '@/api'
 
 const route = useRoute()
@@ -185,6 +202,7 @@ const router = useRouter()
 const loading = ref(false)
 const agents = ref([])
 const projects = ref([])
+const knowledgeSources = ref([])
 const agentPage = ref(1)
 const agentTotal = ref(0)
 const AGENT_PAGE_SIZE = 10
@@ -224,7 +242,7 @@ const PROVIDERS = [
 
 function emptyForm() {
   return {
-    id: null, projectIds: [], name: '', avatar: '', systemPrompt: '',
+    id: null, projectIds: [], knowledgeIds: [], name: '', avatar: '', systemPrompt: '',
     provider: 'deepseek', apiBaseUrl: 'https://api.deepseek.com',
     model: '', temperature: 0.7, apiKey: '', apikeyenc: ''
   }
@@ -243,15 +261,18 @@ const modelSelectOptions = computed(() => {
  * 一个项目可以配置多个角色，所以不再排除"已建过角色"的项目。
  */
 const creatableProjects = computed(() => projects.value.filter(p => p.status === 'READY'))
+const creatableKnowledgeSources = computed(() => knowledgeSources.value.filter(source => source.status === 'READY'))
+const canCreateAgent = computed(() => creatableProjects.value.length > 0 || creatableKnowledgeSources.value.length > 0)
 
 /** 按钮文案要说清为什么不能点，不能一律写"请先创建代码项目" */
 const createButtonText = computed(() => {
-  if (creatableProjects.value.length) return '新建角色'
-  return projects.value.length ? '项目完成索引后才能创建角色' : '请先创建代码项目'
+  if (canCreateAgent.value) return '新建角色'
+  if (projects.value.length || knowledgeSources.value.length) return '来源完成索引后才能创建角色'
+  return '请先创建代码项目或个人知识库'
 })
 
 function projectName(projectId) {
-  const p = projects.value.find(x => x.id === projectId)
+  const p = projects.value.find(x => String(x.id) === String(projectId))
   return p ? p.name : '—'
 }
 
@@ -261,12 +282,32 @@ function projectNames(projectIds) {
   return projectIds.map(projectName).join('、')
 }
 
+function knowledgeName(knowledgeId) {
+  const source = knowledgeSources.value.find(item => String(item.id) === String(knowledgeId))
+  return source ? source.name : '—'
+}
+
+function sourceNames(agent) {
+  const projectsText = (agent.projectIds || []).map(projectName)
+  const knowledgeText = (agent.knowledgeIds || []).map(knowledgeName)
+  const names = [...projectsText.map(name => `项目：${name}`), ...knowledgeText.map(name => `知识库：${name}`)]
+  return names.length ? names.join('、') : '未关联来源'
+}
+
 /** 角色关联的项目实体（找不到的会被过滤掉，例如项目已删除） */
 function linkedProjects(agent) {
-  return (agent.projectIds || []).map(id => projects.value.find(p => p.id === id)).filter(Boolean)
+  return (agent.projectIds || []).map(id => projects.value.find(p => String(p.id) === String(id))).filter(Boolean)
+}
+
+function linkedKnowledgeSources(agent) {
+  return (agent.knowledgeIds || []).map(id => knowledgeSources.value.find(source => String(source.id) === String(id))).filter(Boolean)
 }
 
 function projectStatusText(status) {
+  return ({ PENDING: '待索引', QUEUED: '排队中', INDEXING: '索引中', READY: '已就绪', FAILED: '索引失败' })[status] || status || '未知'
+}
+
+function sourceStatusText(status) {
   return ({ PENDING: '待索引', QUEUED: '排队中', INDEXING: '索引中', READY: '已就绪', FAILED: '索引失败' })[status] || status || '未知'
 }
 
@@ -274,8 +315,8 @@ async function loadAll(page = agentPage.value) {
   agentPage.value = page
   loading.value = true
   try {
-    const [agentRes, projectRes] = await Promise.all([
-      aiAgentList({ page, pageSize: AGENT_PAGE_SIZE }), codeProjectList()
+    const [agentRes, projectRes, knowledgeRes] = await Promise.all([
+      aiAgentList({ page, pageSize: AGENT_PAGE_SIZE }), codeProjectList(), knowledgeSourceList()
     ])
     if (agentRes.code === 200) {
       const data = agentRes.data || {}
@@ -283,6 +324,7 @@ async function loadAll(page = agentPage.value) {
       agentTotal.value = Number(data.total || 0)
     }
     if (projectRes.code === 200) projects.value = projectRes.data || []
+    if (knowledgeRes.code === 200) knowledgeSources.value = knowledgeRes.data || []
   } catch {
     /* 错误提示由请求拦截器统一处理 */
   } finally {
@@ -351,6 +393,8 @@ function openCreate() {
   } else if (creatableProjects.value.length === 1) {
     // 只剩一个可选项目时也直接预选，少点一次
     form.value.projectIds = [creatableProjects.value[0].id]
+  } else if (creatableKnowledgeSources.value.length === 1) {
+    form.value.knowledgeIds = [creatableKnowledgeSources.value[0].id]
   }
   formVisible.value = true
   // 此时还没有 Key，后端会回退预置列表，先把下拉填上
@@ -359,7 +403,7 @@ function openCreate() {
 
 function openEdit(a) {
   form.value = {
-    id: a.id, projectIds: [...(a.projectIds || [])], name: a.name, avatar: a.avatar || '',
+    id: a.id, projectIds: [...(a.projectIds || [])], knowledgeIds: [...(a.knowledgeIds || [])], name: a.name, avatar: a.avatar || '',
     systemPrompt: a.systemprompt || '', model: a.model || '',
     provider: a.provider || 'deepseek', apiBaseUrl: a.apibaseurl || '',
     temperature: a.temperature != null ? Number(a.temperature) : 0.7, apiKey: '',
@@ -373,8 +417,9 @@ function openEdit(a) {
 }
 
 async function saveAgent() {
-  if (!form.value.projectIds || !form.value.projectIds.length) {
-    ElMessage.warning('请至少选择一个关联项目'); return
+  if ((!form.value.projectIds || !form.value.projectIds.length)
+    && (!form.value.knowledgeIds || !form.value.knowledgeIds.length)) {
+    ElMessage.warning('请至少选择一个关联代码项目或个人知识库'); return
   }
   if (!form.value.name || !form.value.name.trim()) {
     ElMessage.warning('请填写角色名称'); return
@@ -386,6 +431,7 @@ async function saveAgent() {
   try {
     const data = {
       projectIds: form.value.projectIds,
+      knowledgeIds: form.value.knowledgeIds,
       name: form.value.name.trim(),
       avatar: form.value.avatar || null,
       systemPrompt: form.value.systemPrompt || null,
@@ -442,10 +488,11 @@ async function startChat(a) {
     openEdit(a)
     return
   }
-  // 角色可能关联多个项目，任意一个没就绪都会让知识库缺一块，所以全部要就绪
+  // 角色可能关联多个来源，任意一个没就绪都会让上下文缺一块，所以全部要就绪
   const linked = linkedProjects(a)
-  if (!linked.length) {
-    ElMessage.warning('该角色未关联代码项目，请先在编辑里关联至少一个项目')
+  const linkedKnowledge = linkedKnowledgeSources(a)
+  if (!linked.length && !linkedKnowledge.length) {
+    ElMessage.warning('该角色未关联任何知识来源，请先在编辑里选择代码项目或个人知识库')
     openEdit(a)
     return
   }
@@ -453,6 +500,12 @@ async function startChat(a) {
   if (notReady) {
     ElMessage.warning(`关联项目「${notReady.name}」尚未完成索引，请先排队索引`)
     router.push('/projects')
+    return
+  }
+  const notReadyKnowledge = linkedKnowledge.find(source => source.status !== 'READY')
+  if (notReadyKnowledge) {
+    ElMessage.warning(`关联知识库「${notReadyKnowledge.name}」尚未完成索引，请先排队索引`)
+    router.push('/knowledge')
     return
   }
   startingId.value = a.id

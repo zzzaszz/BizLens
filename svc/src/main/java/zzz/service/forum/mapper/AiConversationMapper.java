@@ -31,6 +31,8 @@ public interface AiConversationMapper {
 
     int updateStatus(@Param("id") Long id, @Param("status") Integer status, @Param("updatedAt") Date updatedAt);
 
+    int bindAgent(@Param("id") Long id, @Param("agentId") Long agentId, @Param("updatedAt") Date updatedAt);
+
     /** 有新消息时推进会话的 UpdatedAt，会话列表按它倒序、界面也显示它 */
     int touch(@Param("id") Long id, @Param("updatedAt") Date updatedAt);
 }

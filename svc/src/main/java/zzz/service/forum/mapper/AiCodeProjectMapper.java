@@ -27,7 +27,7 @@ public interface AiCodeProjectMapper {
     int startIndex(@Param("id") Long id, @Param("totalFiles") int totalFiles);
 
     int updateIndexProgress(@Param("id") Long id, @Param("processedFiles") int processedFiles,
-                            @Param("skippedFiles") int skippedFiles);
+                            @Param("skippedFiles") int skippedFiles, @Param("currentFile") String currentFile);
 
     /** 索引成功：置 READY、回写 commit 与本次耗时 */
     int markIndexed(@Param("id") Long id, @Param("status") String status,

@@ -24,6 +24,8 @@ public class AiAgentEntity implements Serializable {
      * 由 Service 层填充。
      */
     private List<Long> projectIds;
+    /** 关联的个人知识库ID列表，来自 ai_agent_knowledge。 */
+    private List<Long> knowledgeIds;
     /** 角色名称 */
     private String name;
     /** 角色编码 */

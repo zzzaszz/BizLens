@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiAgentKnowledgeMapper">
+
+    <insert id="insertBatch">
+        insert into ai_agent_knowledge (agent_id, knowledge_id)
+        values
+        <foreach collection="knowledgeIds" item="kid" separator=",">
+            (#{agentId}, #{kid})
+        </foreach>
+        on conflict do nothing
+    </insert>
+
+    <delete id="deleteByAgent">
+        delete from ai_agent_knowledge where agent_id = #{agentId}
+    </delete>
+
+    <select id="listKnowledgeIds" resultType="java.lang.Long">
+        select knowledge_id
+        from ai_agent_knowledge
+        where agent_id = #{agentId}
+        order by created_at asc
+    </select>
+
+    <select id="listRefsByUser" resultType="zzz.service.forum.domain.dto.AiAgentKnowledgeRef">
+        select ak.agent_id as agentId, ak.knowledge_id as knowledgeId
+        from ai_agent_knowledge ak
+        join "AiAgent" a on a."Id" = ak.agent_id
+        where a."UserId" = #{userId}
+        order by ak.created_at asc
+    </select>
+</mapper>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="zzz.service.forum.mapper.AiKnowledgeChunkMapper">
+
+    <insert id="insert" parameterType="zzz.service.forum.domain.AiKnowledgeChunkEntity">
+        <choose>
+            <when test="embeddingVector != null">
+                INSERT INTO ai_knowledge_chunk
+                (id, document_id, chunk_index, heading_path, heading_level, content, embedding_vec, metadata, created_at)
+                VALUES (#{id}, #{documentId}, #{chunkIndex}, #{headingPath}, #{headingLevel}, #{content},
+                        CAST(#{embeddingVector} AS vector), CAST(#{metadata} AS jsonb), #{createdAt})
+            </when>
+            <otherwise>
+                INSERT INTO ai_knowledge_chunk
+                (id, document_id, chunk_index, heading_path, heading_level, content, metadata, created_at)
+                VALUES (#{id}, #{documentId}, #{chunkIndex}, #{headingPath}, #{headingLevel}, #{content},
+                        CAST(#{metadata} AS jsonb), #{createdAt})
+            </otherwise>
+        </choose>
+    </insert>
+
+    <delete id="deleteByDocument">
+        DELETE FROM ai_knowledge_chunk WHERE document_id = #{documentId}
+    </delete>
+
+    <resultMap id="hitMap" type="zzz.service.forum.domain.dto.AiKnowledgeChunkHit">
+        <result property="chunkId" column="chunk_id"/>
+        <result property="documentId" column="document_id"/>
+        <result property="sourceId" column="source_id"/>
+        <result property="sourceName" column="source_name"/>
+        <result property="path" column="path"/>
+        <result property="title" column="title"/>
+        <result property="headingPath" column="heading_path"/>
+        <result property="headingLevel" column="heading_level"/>
+        <result property="content" column="content"/>
+        <result property="startLine" column="start_line"/>
+        <result property="endLine" column="end_line"/>
+        <result property="score" column="score"/>
+        <result property="similarity" column="similarity"/>
+    </resultMap>
+
+    <select id="searchByKeywords" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.source_id,
+               s.name AS source_name,
+               d.path,
+               d.title,
+               c.heading_path,
+               c.heading_level,
+               c.content,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0) AS end_line,
+               (
+               <foreach collection="keywords" item="kw" separator="+">
+                   (CASE WHEN d.path ILIKE '%' || #{kw} || '%' THEN 4 ELSE 0 END
+                   + CASE WHEN d.title ILIKE '%' || #{kw} || '%' THEN 4 ELSE 0 END
+                   + CASE WHEN c.heading_path ILIKE '%' || #{kw} || '%' THEN 3 ELSE 0 END
+                   + CASE WHEN c.content ILIKE '%' || #{kw} || '%' THEN 1 ELSE 0 END)
+               </foreach>
+               ) AS score
+        FROM ai_knowledge_chunk c
+        JOIN ai_knowledge_document d ON d.id = c.document_id
+        JOIN ai_knowledge_source s ON s.id = d.source_id
+        WHERE d.source_id IN
+              <foreach collection="sourceIds" item="sid" open="(" separator="," close=")">#{sid}</foreach>
+          AND (
+               <foreach collection="keywords" item="kw" separator="OR">
+                   d.path ILIKE '%' || #{kw} || '%'
+                   OR d.title ILIKE '%' || #{kw} || '%'
+                   OR c.heading_path ILIKE '%' || #{kw} || '%'
+                   OR c.content ILIKE '%' || #{kw} || '%'
+               </foreach>
+          )
+        ORDER BY score DESC, length(c.content) DESC, c.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchByVector" resultMap="hitMap">
+        SELECT c.id AS chunk_id,
+               c.document_id,
+               d.source_id,
+               s.name AS source_name,
+               d.path,
+               d.title,
+               c.heading_path,
+               c.heading_level,
+               c.content,
+               COALESCE((c.metadata ->> 'startLine')::int, 0) AS start_line,
+               COALESCE((c.metadata ->> 'endLine')::int, 0) AS end_line,
+               0 AS score,
+               (1 - (c.embedding_vec &lt;=&gt; CAST(#{vector} AS vector))) AS similarity
+        FROM ai_knowledge_chunk c
+        JOIN ai_knowledge_document d ON d.id = c.document_id
+        JOIN ai_knowledge_source s ON s.id = d.source_id
+        WHERE d.source_id IN
+              <foreach collection="sourceIds" item="sid" open="(" separator="," close=")">#{sid}</foreach>
+          AND c.embedding_vec IS NOT NULL
+        ORDER BY c.embedding_vec &lt;=&gt; CAST(#{vector} AS vector), c.id ASC
+        LIMIT #{limit}
+    </select>
+</mapper>

@@ -62,6 +62,13 @@
         where "Id" = #{id}
     </update>
 
+    <update id="bindAgent">
+        update "AiConversation"
+        set "AgentId" = #{agentId},
+            "UpdatedAt" = #{updatedAt}
+        where "Id" = #{id}
+    </update>
+
     <update id="touch">
         update "AiConversation"
         set "UpdatedAt" = #{updatedAt}

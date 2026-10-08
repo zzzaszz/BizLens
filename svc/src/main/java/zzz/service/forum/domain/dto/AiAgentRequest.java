@@ -20,6 +20,8 @@ public class AiAgentRequest implements Serializable {
      * 例如前端和后端两个仓库共用一个角色。编辑时整体替换。
      */
     private List<Long> projectIds;
+    /** 关联的个人知识库ID（可与代码项目同时选择，编辑时整体替换）。 */
+    private List<Long> knowledgeIds;
     /** 角色名称 */
     private String name;
     /** 角色编码（可空） */

@@ -32,6 +32,9 @@ public interface AiService {
      */
     boolean reopenConversation(Long userId, Long conversationId);
 
+    /** 为早期未绑定角色的历史会话补绑角色，使其可继续对话。 */
+    boolean bindConversationAgent(Long userId, Long conversationId, Long agentId);
+
     /**
      * 发送消息并获取 AI 回复。
      *
