@@ -23,6 +23,29 @@
         DELETE FROM ai_code_relation WHERE project_id = #{projectId}
     </delete>
 
+    <select id="countRelationSources" resultType="int">
+        SELECT COUNT(*)
+        FROM ai_code_chunk s
+        JOIN ai_code_document sd ON sd.id = s.document_id
+        JOIN ai_code_chunk sf ON sf.document_id = s.document_id AND sf.chunk_type = 'FILE'
+        WHERE sd.project_id = #{projectId}
+          AND s.chunk_type IN ('METHOD', 'FUNCTION', 'MAPPER')
+          AND COALESCE(s.source_snippet, sf.source_snippet) IS NOT NULL
+    </select>
+
+    <select id="countRelationTargets" resultType="int">
+        SELECT COUNT(*)
+        FROM ai_code_chunk t
+        JOIN ai_code_document td ON td.id = t.document_id
+        WHERE td.project_id = #{projectId}
+          AND t.chunk_type IN ('METHOD', 'FUNCTION', 'MAPPER')
+          AND t.symbol_name IS NOT NULL
+          AND length(t.symbol_name) >= 3
+          AND (lower(td.path) LIKE '%service%'
+               OR lower(td.path) LIKE '%mapper%'
+               OR t.chunk_type = 'MAPPER')
+    </select>
+
     <select id="findRelationCandidates" resultType="zzz.service.forum.domain.dto.AiCodeRelationCandidate">
         SELECT s.id AS source_chunk_id, t.id AS target_chunk_id, 'CALL' AS relation_type
         FROM ai_code_chunk s

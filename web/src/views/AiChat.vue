@@ -91,12 +91,6 @@ export default { name: 'AiChat' }
           <el-empty v-if="!messages.length" description="向 AI 发送第一条消息开始对话" :image-size="56" />
         </div>
 
-        <!-- 右键菜单：消息与会话共用（Element Plus 没有右键菜单组件，用一个绝对定位的 div） -->
-        <div v-if="menu.show" class="msg-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
-          <div v-if="menu.kind === 'message'" class="msg-menu-item" @click="removeMessage">删除这条消息</div>
-          <div v-else class="msg-menu-item" @click="removeConversation">删除整个会话</div>
-        </div>
-
         <!-- 未绑定角色的会话（早期数据）没有知识库可依托，续聊必定失败，不能给它"能继续"的假承诺 -->
         <div v-if="!canContinue" class="closed-tip closed-tip--blocked bind-agent-bar">
           <span>该会话未绑定 AI 角色，只能查看历史。选择一个已就绪角色后可继续对话。</span>
@@ -132,6 +126,13 @@ export default { name: 'AiChat' }
         <h3>选择一个会话开始</h3>
         <p>向角色提问代码背后的业务规则与处理流程</p>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建会话</el-button>
+      </div>
+
+      <!-- 菜单必须在 current 条件外，否则删除当前会话后菜单节点会被销毁，后续右键无法显示 -->
+      <div v-if="menu.show" class="msg-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+        @mousedown.stop @click.stop>
+        <div v-if="menu.kind === 'message'" class="msg-menu-item" @click="removeMessage">删除这条消息</div>
+        <div v-else class="msg-menu-item" @click="removeConversation">删除整个会话</div>
       </div>
     </div>
 

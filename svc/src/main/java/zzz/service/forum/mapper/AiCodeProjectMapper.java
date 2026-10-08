@@ -24,6 +24,8 @@ public interface AiCodeProjectMapper {
 
     int updateStatus(@Param("id") Long id, @Param("status") String status);
 
+    int cancelIndex(@Param("id") Long id, @Param("reason") String reason);
+
     int startIndex(@Param("id") Long id, @Param("totalFiles") int totalFiles);
 
     int updateIndexProgress(@Param("id") Long id, @Param("processedFiles") int processedFiles,

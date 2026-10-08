@@ -96,6 +96,18 @@ public class AiCodeProjectController {
         }
     }
 
+    @PostMapping("/{id}/cancelIndex")
+    public R<AiCodeProjectEntity> cancelIndex(@PathVariable Long id) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "请先登录");
+        try {
+            return R.ok(projectService.cancelIndex(userId, id), "索引任务已终止");
+        } catch (Exception e) {
+            logger.warn("cancel code project index error", e);
+            return R.fail(e.getMessage());
+        }
+    }
+
     /** 一键把当前用户的全部项目重新排队索引；正在索引的会跳过 */
     @PostMapping("/indexAll")
     public R<Map<String, Object>> queueIndexAll() {

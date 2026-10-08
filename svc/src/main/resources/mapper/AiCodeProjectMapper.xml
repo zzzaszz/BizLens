@@ -112,6 +112,14 @@
         WHERE id = #{id}
     </update>
 
+    <update id="cancelIndex">
+        UPDATE ai_code_project
+        SET status = 'FAILED', last_error = #{reason}, index_started_at = NULL,
+            index_heartbeat_at = NULL, index_current_file = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('QUEUED', 'INDEXING')
+    </update>
+
     <update id="startIndex">
         UPDATE ai_code_project
         SET status = 'INDEXING', last_error = NULL,
@@ -138,6 +146,7 @@
             last_index_ms = #{durationMs}, index_started_at = NULL,
             index_heartbeat_at = NULL, index_current_file = NULL
         WHERE id = #{id}
+          AND status IN ('QUEUED', 'INDEXING')
     </update>
 
     <!-- 索引失败：状态与原因一起写入，前端据此展示可排查的提示 -->
@@ -155,7 +164,10 @@
       没有心跳就只能靠一个很宽的时间窗猜，窗口内用户看到的是假的"索引中"。
     -->
     <update id="touchIndexHeartbeat">
-        UPDATE ai_code_project SET index_heartbeat_at = CURRENT_TIMESTAMP WHERE id = #{id}
+        UPDATE ai_code_project
+        SET index_heartbeat_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status IN ('QUEUED', 'INDEXING')
     </update>
 
     <!--

@@ -121,6 +121,17 @@ public class AiCodeProjectServiceImpl implements AiCodeProjectService {
     }
 
     @Override
+    public AiCodeProjectEntity cancelIndex(Long userId, Long projectId) {
+        AiCodeProjectEntity project = requireOwner(userId, projectId);
+        if (!"QUEUED".equals(project.getStatus()) && !"INDEXING".equals(project.getStatus())) {
+            throw new BaseBusinessException("该项目当前没有正在运行的索引任务");
+        }
+        indexService.requestCancel(projectId);
+        projectMapper.cancelIndex(projectId, "索引任务已由用户手动终止，可重新排队索引");
+        return projectMapper.getById(projectId);
+    }
+
+    @Override
     public Map<String, Object> queueIndexAll(Long userId) {
         List<AiCodeProjectEntity> projects = projectMapper.listByUser(userId);
         List<String> skippedNames = new ArrayList<>();

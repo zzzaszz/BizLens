@@ -7,9 +7,11 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import javax.annotation.PostConstruct;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,8 +32,17 @@ public class OpenAiCompatibleEmbeddingProvider implements AiEmbeddingProvider {
     private String model;
     @Value("${ai.embedding.dimension:1536}")
     private int dimension;
+    @Value("${ai.embedding.connect-timeout-ms:5000}")
+    private int connectTimeoutMs;
+    @Value("${ai.embedding.read-timeout-ms:20000}")
+    private int readTimeoutMs;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private RestTemplate restTemplate = new RestTemplate(requestFactory(5000, 20000));
+
+    @PostConstruct
+    public void configureRestTemplate() {
+        restTemplate = new RestTemplate(requestFactory(connectTimeoutMs, readTimeoutMs));
+    }
 
     @Override
     public boolean isEnabled() {
@@ -89,5 +100,16 @@ public class OpenAiCompatibleEmbeddingProvider implements AiEmbeddingProvider {
     private String trimTrailingSlash(String value) {
         String v = value.trim();
         return v.endsWith("/") ? v.substring(0, v.length() - 1) : v;
+    }
+
+    SimpleClientHttpRequestFactory requestFactory(int connectTimeoutMs, int readTimeoutMs) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(safeTimeout(connectTimeoutMs, 5000));
+        factory.setReadTimeout(safeTimeout(readTimeoutMs, 20000));
+        return factory;
+    }
+
+    private int safeTimeout(int value, int fallback) {
+        return value > 0 ? value : fallback;
     }
 }

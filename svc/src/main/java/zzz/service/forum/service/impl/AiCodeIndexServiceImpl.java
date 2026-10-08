@@ -82,6 +82,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private static final int HEARTBEAT_GRACE_SECONDS = 180;
     /** 本进程正在使用的临时目录；清理时跳过它们，避免误删正在跑的索引 */
     private static final Set<Path> ACTIVE_WORKSPACES = ConcurrentHashMap.newKeySet();
+    /** 用户主动终止索引时写入；索引线程在文件边界和收尾阶段主动检查。 */
+    private static final Set<Long> CANCEL_REQUESTS = ConcurrentHashMap.newKeySet();
     /** 单个切片的源码片段上限，防止一个巨型方法把库撑爆 */
     private static final int MAX_SNIPPET_CHARS = 1200;
     /** 每个文件所有切片的源码总量上限，兜住 MAX_SYMBOLS_PER_FILE 带来的最坏情况 */
@@ -115,6 +117,8 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     private int configuredMaxFiles;
     @Value("${ai.index.max-file-bytes:2097152}")
     private long configuredMaxFileBytes;
+    @Value("${ai.index.relation-max-pairs:5000000}")
+    private long configuredRelationMaxPairs;
     private final CodeSymbolExtractor symbolExtractor = new CodeSymbolExtractor();
     private final CodeSecretScanner secretScanner = new CodeSecretScanner();
     private volatile boolean vectorPersistenceDisabled;
@@ -160,6 +164,7 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             cleanStaleWorkspaces();
             project = projectMapper.getById(projectId);
             if (project == null) return;
+            throwIfCancelRequested(projectId);
             // 心跳：让"这个 INDEXING 是真在跑还是进程已经没了"可判断（见 HEARTBEAT_* 常量）
             projectMapper.touchIndexHeartbeat(projectId);
             heartbeat = startHeartbeat(projectId);
@@ -189,30 +194,46 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
                     projectId, maxFiles, maxFileBytes);
             Files.walkFileTree(workspace, new SimpleFileVisitor<Path>() {
                 @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    throwIfCancelRequested(projectId);
                     if (!isIndexable(file) || isIgnored(root, file)) return FileVisitResult.CONTINUE;
-                    counter.processed++;
+                    counter.visited++;
                     String currentFile = root.relativize(file).toString().replace('\\', '/');
                     updateProgress(projectId, counter, totalFiles, currentFile);
-                    if (counter.processed > maxFiles || attrs.size() > maxFileBytes) {
+                    if (counter.visited > maxFiles || attrs.size() > maxFileBytes) {
                         counter.skipped++;
+                        counter.processed++;
+                        updateProgress(projectId, counter, totalFiles, currentFile);
                         return FileVisitResult.CONTINUE;
                     }
                     try {
+                        throwIfCancelRequested(projectId);
                         indexFile(projectId, root, file, attrs.size());
+                        throwIfCancelRequested(projectId);
                         counter.indexed++;
+                    } catch (IndexCancelledException e) {
+                        throw e;
                     } catch (Exception e) {
                         counter.skipped++;
                         log.warn("skip code file {}: {}", file, e.getMessage());
                     }
+                    counter.processed++;
+                    updateProgress(projectId, counter, totalFiles, currentFile);
                     return FileVisitResult.CONTINUE;
                 }
             });
+            throwIfCancelRequested(projectId);
+            updateProgress(projectId, counter, totalFiles, "生成调用关系");
+            throwIfCancelRequested(projectId);
             rebuildRelations(projectId);
+            throwIfCancelRequested(projectId);
             long durationMs = System.currentTimeMillis() - startedAt;
             projectMapper.markIndexed(projectId, "READY", commit, durationMs);
             log.info("code project indexed, projectId={}, files={}, skipped={}, total={}, commit={}, durationMs={}",
                     projectId, counter.indexed, counter.skipped, totalFiles, commit, durationMs);
+        } catch (IndexCancelledException e) {
+            log.info("code project index cancelled, projectId={}", projectId);
+            projectMapper.markFailed(projectId, e.getMessage());
         } catch (Exception e) {
             log.warn("code project index failed, projectId={}", projectId, e);
             // 同时写库：前端只看到一个「失败」标签是不够的，要能看到为什么失败
@@ -229,6 +250,14 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             if (isolatedHome != null) {
                 ACTIVE_WORKSPACES.remove(isolatedHome);
             }
+            CANCEL_REQUESTS.remove(projectId);
+        }
+    }
+
+    @Override
+    public void requestCancel(Long projectId) {
+        if (projectId != null) {
+            CANCEL_REQUESTS.add(projectId);
         }
     }
 
@@ -490,6 +519,15 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
      */
     private void rebuildRelations(Long projectId) {
         chunkMapper.deleteRelationsByProject(projectId);
+        int sources = chunkMapper.countRelationSources(projectId);
+        int targets = chunkMapper.countRelationTargets(projectId);
+        long candidatePairs = (long) sources * (long) targets;
+        long maxPairs = relationMaxPairs();
+        if (maxPairs > 0 && candidatePairs > maxPairs) {
+            log.warn("skip code graph relations, projectId={}, sources={}, targets={}, candidatePairs={}, maxPairs={}",
+                    projectId, sources, targets, candidatePairs, maxPairs);
+            return;
+        }
         int inserted = 0;
         for (AiCodeRelationCandidate candidate : chunkMapper.findRelationCandidates(projectId)) {
             if (candidate == null || candidate.getSourceChunkId() == null || candidate.getTargetChunkId() == null
@@ -501,6 +539,10 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
             inserted++;
         }
         log.info("code graph relations rebuilt, projectId={}, relations={}", projectId, inserted);
+    }
+
+    private long relationMaxPairs() {
+        return configuredRelationMaxPairs > 0 ? configuredRelationMaxPairs : 0L;
     }
 
     /**
@@ -894,9 +936,28 @@ public class AiCodeIndexServiceImpl implements AiCodeIndexService {
     }
 
     private static class IndexCounter {
+        private int visited;
         private int processed;
         private int indexed;
         private int skipped;
+    }
+
+    private void throwIfCancelRequested(Long projectId) {
+        if (projectId == null) return;
+        if (CANCEL_REQUESTS.contains(projectId)) {
+            throw new IndexCancelledException("索引任务已由用户手动终止，可重新排队索引");
+        }
+        AiCodeProjectEntity latest = projectMapper.getById(projectId);
+        if (latest != null && "FAILED".equals(latest.getStatus())
+                && latest.getLastError() != null && latest.getLastError().contains("手动终止")) {
+            throw new IndexCancelledException(latest.getLastError());
+        }
+    }
+
+    private static class IndexCancelledException extends RuntimeException {
+        IndexCancelledException(String message) {
+            super(message);
+        }
     }
 
     /** 单文件源码片段总额度：用完之后该文件剩余的符号切片不再落源码，避免超大文件把库撑爆 */

@@ -15,6 +15,10 @@ public interface AiCodeChunkMapper {
 
     int deleteRelationsByProject(@Param("projectId") Long projectId);
 
+    int countRelationSources(@Param("projectId") Long projectId);
+
+    int countRelationTargets(@Param("projectId") Long projectId);
+
     List<AiCodeRelationCandidate> findRelationCandidates(@Param("projectId") Long projectId);
 
     int insertRelation(@Param("id") Long id,

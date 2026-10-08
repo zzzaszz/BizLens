@@ -50,7 +50,7 @@
           <!-- 进度/时间：索引中显示已用多久与预计，完成显示完成时间，中断显示中断时间 -->
           <p v-if="statusTimeText(row)" class="status-time">{{ statusTimeText(row) }}</p>
           <p v-if="row.indexCurrentFile && isIndexRunning(row)" class="status-file" :title="row.indexCurrentFile">
-            正在处理：{{ row.indexCurrentFile }}
+            {{ currentIndexStepText(row) }}
           </p>
           <!-- 索引失败/中断要能看到原因，否则只有一个标签没法排查 -->
           <el-tooltip v-if="row.lastError" placement="top" :show-after="100">
@@ -79,6 +79,8 @@
           <el-button link :loading="indexingId === row.id"
             :disabled="isIndexRunning(row)"
             @click="queueIndex(row)">{{ indexActionText(row) }}</el-button>
+          <el-button v-if="isIndexRunning(row)" link type="danger" :loading="cancelingId === row.id"
+            @click="cancelIndex(row)">终止索引</el-button>
           <el-tooltip v-if="row.status !== 'READY'"
             placement="top" content="项目完成索引后才能创建角色">
             <span class="btn-disabled-wrap"><el-button link type="primary" disabled>创建角色</el-button></span>
@@ -148,6 +150,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import {
+  codeProjectCancelIndex,
   codeProjectCreate, codeProjectDelete, codeProjectList,
   codeProjectQueueIndex, codeProjectQueueIndexAll, codeProjectUpdate, aiAgentList
 } from '@/api'
@@ -162,6 +165,7 @@ const PROJECT_PAGE_SIZE = 10
 const loading = ref(false)
 const saving = ref(false)
 const indexingId = ref(null)
+const cancelingId = ref(null)
 /** 一键索引请求进行中，避免连点 */
 const queuingAll = ref(false)
 const visible = ref(false)
@@ -308,6 +312,12 @@ function indexProgress(row) {
   return Math.round(processed * 100 / total)
 }
 
+function currentIndexStepText(row) {
+  if (!row || !row.indexCurrentFile) return ''
+  if (row.indexCurrentFile === '生成调用关系') return `正在收尾：${row.indexCurrentFile}`
+  return `正在处理：${row.indexCurrentFile}`
+}
+
 /** 中断的索引按"信息态"显示，不要用和"进行中"一样的黄色，否则看不出来它已经死了 */
 function statusTypeOf(row) {
   if (isIndexInterrupted(row)) return 'info'
@@ -448,6 +458,25 @@ async function queueIndex(row) {
     if (res.code !== 200) throw new Error(res.msg || '排队失败')
     ElMessage.success('索引任务已排队'); await loadProjects()
   } catch (e) { ElMessage.error(e.message || '排队失败') } finally { indexingId.value = null }
+}
+
+async function cancelIndex(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定终止项目“${row.name}”当前索引任务吗？已写入的本轮索引数据可能不完整，终止后可重新排队索引。`,
+      '终止索引', { type: 'warning' })
+  } catch { return }
+  cancelingId.value = row.id
+  try {
+    const res = await codeProjectCancelIndex(row.id)
+    if (res.code !== 200) throw new Error(res.msg || '终止失败')
+    ElMessage.success('索引任务已终止')
+    await loadProjects()
+  } catch (e) {
+    ElMessage.error(e.message || '终止失败')
+  } finally {
+    cancelingId.value = null
+  }
 }
 
 /**

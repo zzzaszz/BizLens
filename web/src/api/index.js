@@ -105,6 +105,10 @@ export function codeProjectQueueIndex(id) {
   return request({url: `/ai/project/${id}/index`, method: 'post'})
 }
 
+export function codeProjectCancelIndex(id) {
+  return request({url: `/ai/project/${id}/cancelIndex`, method: 'post'})
+}
+
 /** 一键把全部项目重新排队索引；返回 { total, queued, skipped, skippedNames } */
 export function codeProjectQueueIndexAll() {
   return request({url: '/ai/project/indexAll', method: 'post'})

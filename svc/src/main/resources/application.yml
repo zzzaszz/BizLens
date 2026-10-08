@@ -39,9 +39,12 @@ ai:
     api-key: ${AI_EMBEDDING_API_KEY:}
     model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
     dimension: ${AI_EMBEDDING_DIMENSION:1536}
+    connect-timeout-ms: ${AI_EMBEDDING_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${AI_EMBEDDING_READ_TIMEOUT_MS:20000}
   index:
     max-files: ${AI_INDEX_MAX_FILES:2000}
     max-file-bytes: ${AI_INDEX_MAX_FILE_BYTES:2097152}
+    relation-max-pairs: ${AI_INDEX_RELATION_MAX_PAIRS:5000000}
   knowledge:
     index:
       max-files: ${AI_KNOWLEDGE_MAX_FILES:2000}
