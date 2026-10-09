@@ -1,0 +1,8 @@
+# 容器与 Shell 脚本必须保持 LF 换行：
+# CRLF 会让容器内 entrypoint.sh 的 shebang 与 set 命令失效，也会影响 Dockerfile 的续行解析。
+# 本机 core.autocrlf=true，靠这里的声明保证这两类文件在 Windows 检出时也是 LF。
+*.sh text eol=lf
+Dockerfile text eol=lf
+dockerfile text eol=lf
+# 构建上下文依赖它排除源码，CRLF 会让排除规则失配
+.dockerignore text eol=lf

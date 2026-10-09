@@ -1,0 +1,45 @@
+# 生产配置：由 --spring.profiles.active=prod 启用，随 jar 一起发布（不打进镜像外挂文件）。
+# 所有环境相关的取值都由环境变量注入，变量名与 application-dev.yml 保持一致；
+# 占位符由 Spring 自己解析，所以口令里的特殊字符不会影响 YAML 解析。
+# 必填变量缺失时启动直接失败并提示 Could not resolve placeholder，不会静默连到开发环境地址。
+server:
+  tomcat:
+    uri-encoding: UTF-8
+
+#spring数据源
+spring:
+  main:
+    allow-bean-definition-overriding: true #当遇到同样名字的时候，是否允许覆盖注册
+  # 单机部署不注册 Nacos，跨域与路由由本服务自行处理（与 application-dev.yml 一致）
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        enabled: false
+    compatibility-verifier:
+      enabled: false  # 禁用兼容性检查(springboot和springcloud版本不兼容)
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-test-query: SELECT 1
+      maximum-pool-size: 5
+  redis:
+    database: 0
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT}
+    password: ${REDIS_PASSWORD:} # 可为空
+    jedis:
+      pool:
+        max-active: 200
+        # 连接池最大阻塞等待时间（使用负值表示没有限制）
+        max-wait: -1
+        # 连接池中的最大空闲连接
+        max-idle: 10
+        # 连接池中的最小空闲连接
+        min-idle: 0
+    # 连接超时时间（毫秒）
+    timeout: 6000
