@@ -145,22 +145,24 @@
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt;
 
 <span class="cm"># 服务器：compose 拉取 + 启动（latest 已指向刚才那版）</span>
-<span class="cmd">./docker/run.sh</span></pre>
+<span class="cmd">bash</span> docker/run.sh</pre>
     </div>
     <div>
       <h3>路径 B：Windows 没有 Docker<span class="badge">不需要装</span></h3>
-<pre><span class="cm"># 1) Windows：只打包</span>
+<pre><span class="cm"># 1) Windows：打包，顺带生成部署包（jar + 脚本 + compose 文件）</span>
 <span class="cmd">bash</span> docker/package.sh
 
-<span class="cm"># 2) 把 jar 传到服务器（细节见第 3 节）</span>
-<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" \
+<span class="cm"># 2) 上传部署包</span>
+<span class="cmd">scp</span> -O -v -P 19992 bizlens-deploy.tar.gz \
     zzzoooo2@zzzoooo2.top:/vol1/1000/app/
 
-<span class="cm"># 3) 服务器：构建 + 推送（标签同样自动生成）</span>
-<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package
+<span class="cm"># 3) 服务器：解包后构建 + 推送（必须解包，只传压缩包不算装好）</span>
+<span class="cmd">cd</span> /vol1/1000/app &amp;&amp; <span class="cmd">tar</span> -xzf bizlens-deploy.tar.gz
+<span class="cmd">chmod</span> +x docker/*.sh
+<span class="cmd">bash</span> docker/release.sh &lt;账号&gt; --skip-package
 
 <span class="cm"># 4) 服务器（同机）：compose 拉取 + 启动</span>
-<span class="cmd">./docker/run.sh</span></pre>
+<span class="cmd">bash</span> docker/run.sh</pre>
     </div>
   </div>
 </div>
@@ -264,7 +266,7 @@
   <table>
     <tr><th>机器</th><th>需要安装</th></tr>
     <tr><td>Windows</td><td>Git Bash（Git for Windows 自带）、Node 18/20 + pnpm、JDK 8、Maven 3.8+</td></tr>
-    <tr><td>服务器</td><td>Docker + Docker Compose；仓库代码（<code>git clone</code>）用于拿到 <code>docker/</code> 脚本与 compose 文件</td></tr>
+    <tr><td>服务器</td><td>Docker + Docker Compose、<code>tar</code>（系统自带）。<strong>不需要 git、Node、JDK、Maven</strong>——脚本与 jar 由部署包带上来</td></tr>
   </table>
 
   <div class="note warn">
@@ -276,7 +278,7 @@
 <!-- ============ 3 ============ -->
 <section id="s3">
   <h2 class="sec"><span class="num">3</span>打包 jar（Windows，必做）</h2>
-  <p>两条路径都要先打包。路径 A 由 <code class="inl">release.sh</code> 自动完成，路径 B 需要手工执行并把产物传到服务器。</p>
+  <p>两条路径都要先打包。路径 A 由 <code class="inl">release.sh</code> 自动完成；路径 B 需手工执行，并把生成的部署包传到服务器。</p>
 
 <pre><span class="cm"># Windows，Git Bash，仓库根目录</span>
 <span class="cmd">bash</span> docker/package.sh</pre>
@@ -290,27 +292,56 @@
     <tr><td class="mono">web/dist/</td><td>前端构建中间产物，已在 .gitignore 中</td></tr>
   </table>
 
-  <h3 class="sub">路径 B：把 jar 传到服务器</h3>
-<pre><span class="cm"># 服务器：在部署目录拉仓库（脚本与配置由此获得）</span>
-<span class="cmd">cd</span> /vol1/1000/app
-<span class="cmd">git</span> clone &lt;仓库地址&gt; .
-<span class="cmd">mkdir</span> -p svc/target      <span class="cm"># jar 的落点；git 不跟踪空目录，必须手工建</span>
-<span class="cmd">chmod</span> +x docker/*.sh
+  <h3 class="sub">路径 B：把部署包传到服务器</h3>
+  <p><code class="inl">package.sh</code> 在打完 jar 后会顺手生成 <code class="inl">bizlens-deploy.tar.gz</code>，里面就是服务器构建与运行所需的全部文件。服务器<strong>不需要装 git、Node、JDK、Maven，也不需要拉仓库</strong>。</p>
 
-<span class="cm"># Windows：把 jar 传上去</span>
-<span class="cm">#   -O 用旧版 SCP 协议（NAS / 老 OpenSSH 的 SFTP 子系统不可用时需要）</span>
-<span class="cm">#   -v 打印详细过程，排查连不上、权限问题时很有用；-P 大写指定 SSH 端口</span>
-<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" zzzoooo2@zzzoooo2.top:/vol1/1000/app/</pre>
+  <table>
+    <caption>部署包内容（传一个文件即可）</caption>
+    <tr><th>包内路径</th><th>用途</th></tr>
+    <tr><td class="mono">svc/target/bizlens-ai-service-*.jar</td><td>打包产物（含前端与 prod 配置），Dockerfile 的 COPY 对象</td></tr>
+    <tr><td class="mono">svc/Dockerfile</td><td>镜像定义</td></tr>
+    <tr><td class="mono">svc/entrypoint.sh</td><td>容器入口（校验环境变量后启动）</td></tr>
+    <tr><td class="mono">svc/.dockerignore</td><td>让构建上下文只带 jar</td></tr>
+    <tr><td class="mono">docker/build.sh、push.sh、release.sh</td><td>构建与推送脚本</td></tr>
+    <tr><td class="mono">docker/docker-compose.yml、run.sh</td><td>启动用（compose 定义 + 包装脚本）</td></tr>
+    <tr><td class="mono">docker/.env.example、部署说明.html</td><td>环境变量模板与本说明</td></tr>
+  </table>
+  <p>包内<strong>不含</strong> <code class="inl">docker/.env</code>——那是各环境自己的配置，由服务器上 <code class="inl">cp docker/.env.example docker/.env</code> 生成。</p>
+
+<pre><span class="cm"># ① Windows：上传部署包
+#   -O 用旧版 SCP 协议（NAS / 老 OpenSSH 的 SFTP 子系统不可用时需要）
+#   -v 打印详细过程，排查连接与权限问题时很有用；-P 大写指定 SSH 端口</span>
+<span class="cmd">scp</span> -O -v -P 19992 bizlens-deploy.tar.gz zzzoooo2@zzzoooo2.top:/vol1/1000/app/
+
+<span class="cm"># ② 服务器：解包并确认到位 —— 只传压缩包不算装好，这一步不能跳
+#   解包目录必须就是 /vol1/1000/app，脚本按 svc/ 与 docker/ 的相对结构找文件</span>
+<span class="cmd">cd</span> /vol1/1000/app
+<span class="cmd">tar</span> -xzf bizlens-deploy.tar.gz
+<span class="cmd">chmod</span> +x docker/*.sh          <span class="cm"># 补执行位（包内本是 755，用 GUI 工具解包可能丢）</span>
+<span class="cmd">ls</span> -l docker/release.sh docker/docker-compose.yml svc/target/*.jar   <span class="cm"># 三个都在才算就绪</span></pre>
+
+  <p>解包后的目录结构如下。脚本按这套相对结构找文件，请不要手工挪动：</p>
+<pre>/vol1/1000/app/
+  svc/
+    Dockerfile
+    entrypoint.sh
+    .dockerignore
+    target/bizlens-ai-service-0.0.1-SNAPSHOT.jar
+  docker/
+    build.sh   push.sh   release.sh   run.sh
+    docker-compose.yml
+    .env.example        <span class="cm"># 下一步复制成 .env</span></pre>
 
   <div class="note warn">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>jar 最终必须放在<strong>仓库根目录下的 <code class="inl">svc/target/</code></strong>——脚本按这个相对路径找它（Docker 构建上下文就是 <code class="inl">svc/</code>）。上面这条命令把它放在了 <code class="inl">/vol1/1000/app/</code>。若那里就是仓库根目录，二选一：传完挪一下 <code class="inl">mv /vol1/1000/app/bizlens-ai-service-*.jar /vol1/1000/app/svc/target/</code>，或把 scp 目标直接写成 <code class="inl">zzzoooo2@zzzoooo2.top:/vol1/1000/app/svc/target/</code>（该目录要先存在，见上面的 <code class="inl">mkdir -p</code>）。</p>
+    <p>必须解到<code class="inl">/vol1/1000/app/</code>（或别的目录也行，只要 <code class="inl">svc/</code> 与 <code class="inl">docker/</code> 的相对关系不变），否则脚本找不到 jar。</p>
+    <p>若只想单独传 jar，必须放到 <code class="inl">&lt;部署目录&gt;/svc/target/</code> 下；直接丢在部署根目录会报「未找到 svc/target/bizlens-ai-service-*.jar」。</p>
     <p>若 scp 报 <code class="inl">unknown option -- O</code>，说明本机 OpenSSH 太老（<code class="inl">-O</code> 需 9.0+），去掉该参数即可。</p>
   </div>
 
   <div class="note tip">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
-    <p>只传 jar 即可，<code class="inl">docker/</code> 下的脚本通过 <code class="inl">git clone</code> 获得（换行符自然是 LF）。打包会把前端产物临时写进 <code class="inl">src/main/resources/static</code>，结束即删除，<code class="inl">git status</code> 不会留残留。</p>
+    <p>打包会把前端产物临时写进 <code class="inl">src/main/resources/static</code>，结束即删除，<code class="inl">git status</code> 不会留残留。<code class="inl">bizlens-deploy.tar.gz</code> 在 <code class="inl">.gitignore</code> 中，不会进版本库。</p>
   </div>
 </section>
 
@@ -327,9 +358,9 @@
 <span class="cmd">bash</span> docker/release.sh &lt;账号&gt;</pre>
 
   <h3 class="sub">路径 B：Windows 无 Docker Desktop，在服务器上构建</h3>
-  <p>jar 已在 <code class="inl">svc/target/</code> 下（见第 3 节），在<strong>服务器</strong>的仓库根目录：</p>
-<pre><span class="cm"># 用现成 jar 构建 + 推送，不重新打包</span>
-<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package</pre>
+  <p>部署包已解到 <code class="inl">/vol1/1000/app/</code>（见第 3 节），在<strong>服务器</strong>的该目录下执行：</p>
+<pre><span class="cm"># 用现成 jar 构建 + 推送，不重新打包（用 bash 调用，不依赖执行位）</span>
+<span class="cmd">bash</span> docker/release.sh &lt;账号&gt; --skip-package</pre>
   <div class="note ok">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
     <p><code class="inl">--skip-package</code> 是关键：服务器上没有 Node/JDK/Maven，这个参数让脚本跳过打包，直接用传上来的 jar。服务器只要能访问 Docker Hub 即可。</p>
@@ -368,7 +399,7 @@
   </table>
   <div class="note tip">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
-    <p>自动生成的两个好处：标签<strong>天然唯一且按时间有序</strong>，回滚时一眼就能找到上一版；同时把 <code class="inl">latest</code> 指向它，服务器上直接 <code class="inl">./docker/run.sh</code> 就是最新版，不用记版本号。</p>
+    <p>自动生成的两个好处：标签<strong>天然唯一且按时间有序</strong>，回滚时一眼就能找到上一版；同时把 <code class="inl">latest</code> 指向它，服务器上直接 <code class="inl">bash docker/run.sh</code> 就是最新版，不用记版本号。</p>
     <p><code class="inl">--git</code> 适合"这个镜像到底对应哪次提交"要能查的场景；<code class="inl">latest</code> 不被更新，意味着显式发布 <code class="inl">1.0.0</code> 时不会悄悄改变服务器下次拉取的结果。</p>
   </div>
 
@@ -449,16 +480,16 @@
 
   <h3 class="sub">6.3 启动：docker compose<span class="tag">推荐</span></h3>
   <p>服务由 <code class="inl">docker/docker-compose.yml</code> 定义，启动就是一条 compose 命令。<code class="inl">run.sh</code> 是它的包装（多做两件事：启动前校验环境变量、启动后等就绪）：</p>
-<pre><span class="cmd">./docker/run.sh</span>                 <span class="cm"># 校验 .env → compose pull → up -d → 等就绪</span>
-<span class="cmd">./docker/run.sh</span> --recreate      <span class="cm"># 强制重建容器</span>
+<pre><span class="cmd">bash</span> docker/run.sh              <span class="cm"># 校验 .env → compose pull → up -d → 等就绪</span>
+<span class="cmd">bash</span> docker/run.sh --recreate   <span class="cm"># 强制重建容器</span>
 
 <span class="cm"># 等价的手工 compose 命令（先 cd 到 docker/，.env 就在那里）</span>
 <span class="cmd">cd</span> docker
 <span class="cmd">docker</span> compose pull
 <span class="cmd">docker</span> compose up -d</pre>
   <p>临时换版本或端口不必改 <code class="inl">.env</code>，命令行传入即可（优先级高于 <code class="inl">.env</code>）：</p>
-<pre><span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>    <span class="cm"># 起指定版本（回滚常用）</span>
-<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">./docker/run.sh</span>       <span class="cm"># 换宿主机端口</span></pre>
+<pre><span class="cmd">TAG</span>=20261008-1712 <span class="cmd">bash</span> docker/run.sh    <span class="cm"># 起指定版本（回滚常用）</span>
+<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">bash</span> docker/run.sh       <span class="cm"># 换宿主机端口</span></pre>
 
   <h3 class="sub">6.4 compose 文件说明</h3>
   <table>
@@ -525,13 +556,14 @@
 <pre><span class="cm"># 路径 A：Windows 有 Docker，一条命令出新版本（标签自动生成）</span>
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt;
 
-<span class="cm"># 路径 B：Windows 只打包，服务器构建推送</span>
-<span class="cmd">bash</span> docker/package.sh                       <span class="cm"># Windows</span>
-<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" zzzoooo2@zzzoooo2.top:/vol1/1000/app/
-<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package   <span class="cm"># 服务器</span>
+<span class="cm"># 路径 B：Windows 打包并生成部署包，服务器解包后构建推送</span>
+<span class="cmd">bash</span> docker/package.sh                              <span class="cm"># Windows：产出 bizlens-deploy.tar.gz</span>
+<span class="cmd">scp</span> -O -v -P 19992 bizlens-deploy.tar.gz zzzoooo2@zzzoooo2.top:/vol1/1000/app/
+<span class="cmd">cd</span> /vol1/1000/app &amp;&amp; <span class="cmd">tar</span> -xzf bizlens-deploy.tar.gz    <span class="cm"># 服务器：覆盖旧文件，docker/.env 不在包内、会保留</span>
+<span class="cmd">bash</span> docker/release.sh &lt;账号&gt; --skip-package             <span class="cm"># 服务器：构建 + 推送</span>
 
 <span class="cm"># 服务器：compose 拉新镜像并起容器（latest 已被上次发布更新）</span>
-<span class="cmd">./docker/run.sh</span>
+<span class="cmd">bash</span> docker/run.sh
 
 <span class="cm"># 想按语义版本发布（且不改变 latest 指向）时显式给标签</span>
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt; 1.0.1</pre>
@@ -542,11 +574,11 @@
 <span class="cmd">docker</span> images | <span class="cmd">grep</span> bizlens-ai
 
 <span class="cm"># 方式一：临时回滚，不改配置文件</span>
-<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>
+<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">bash</span> docker/run.sh
 
 <span class="cm"># 方式二：长期固定在某个版本</span>
 <span class="cmd">vi</span> docker/.env          <span class="cm"># 把 TAG=latest 改成 TAG=20261008-1712</span>
-<span class="cmd">./docker/run.sh</span></pre>
+<span class="cmd">bash</span> docker/run.sh</pre>
   <p>旧镜像仍在私有仓库与本地，回滚不需要重新构建。若要长期保留某个版本，用显式标签（<code class="inl">1.0.0</code>）发布更稳妥。</p>
 
   <h3 class="sub">数据库变更</h3>
@@ -651,6 +683,10 @@
     <caption>服务器运行阶段（docker compose）</caption>
     <tr><th>现象</th><th>原因与处理</th></tr>
     <tr>
+      <td>服务器上执行 <code>sudo ./docker/release.sh</code> 报 <code>command not found</code>（或 No such file or directory）</td>
+      <td>两种原因，<code>ls -l docker/release.sh</code> 一看便知：① <strong>没解包</strong>——只把 <code>bizlens-deploy.tar.gz</code> 传上来了，这个路径下没有该文件，先按第 3 节 <code>tar -xzf</code> 解包；② 文件在但<strong>没有执行位</strong>（权限显示 <code>-rw-r--r--</code>），<code>chmod +x docker/*.sh</code> 即可。不想管执行位就直接 <code>bash docker/release.sh</code>；需要 root 跑 docker 就用 <code>sudo bash docker/release.sh</code>——<strong><code>bash</code> 方式不依赖执行位，最稳</strong>。</td>
+    </tr>
+    <tr>
       <td>找不到 <code>docker compose</code> 命令</td>
       <td>本机没装 compose 插件。Docker Desktop 自带；Linux 上装 <code>docker-compose-plugin</code>。<code>run.sh</code> 会自动在 <code>docker compose</code> 与老版的 <code>docker-compose</code> 之间择一，两者都没有才会报错。</td>
     </tr>
@@ -700,7 +736,7 @@
   <table>
     <caption>docker/ 下的文件</caption>
     <tr><th>文件</th><th>在哪跑</th><th>做什么</th></tr>
-    <tr><td class="mono">package.sh</td><td>Windows（需 Node/JDK/Maven）</td><td>前端构建并并入 jar，Maven 打包出可部署 jar</td></tr>
+    <tr><td class="mono">package.sh</td><td>Windows（需 Node/JDK/Maven）</td><td>前端构建并并入 jar，Maven 打包出 jar，再打成部署包 <code>bizlens-deploy.tar.gz</code></td></tr>
     <tr><td class="mono">build.sh</td><td>装了 Docker 的机器</td><td>校验 jar 与 daemon，构建镜像（<strong>不推送</strong>）</td></tr>
     <tr><td class="mono">push.sh</td><td>装了 Docker 的机器</td><td>校验后推送镜像，可选同时更新 latest</td></tr>
     <tr><td class="mono">release.sh</td><td>装了 Docker 的机器</td><td>一条命令串起 打包 → 构建 → 推送</td></tr>
@@ -721,18 +757,19 @@
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt;                        <span class="cm"># 打包+构建+推送，标签自动生成</span>
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt; --git                  <span class="cm"># 标签用 git 提交短哈希</span>
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt; 1.0.0                   <span class="cm"># 指定标签（不动 latest）</span>
-<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package          <span class="cm"># 用现有 jar（路径 B）</span>
+<span class="cmd">bash</span> docker/release.sh &lt;账号&gt; --skip-package       <span class="cm"># 用现有 jar（路径 B，服务器上跑）</span>
 <span class="cmd">./docker/release.sh</span> &lt;账号&gt; --no-push               <span class="cm"># 只打包+构建</span>
 <span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span>                   <span class="cm"># 只构建</span>
 <span class="cmd">./docker/push.sh</span> &lt;账号&gt; 20261009-1435              <span class="cm"># 只推送某个标签</span>
 <span class="cmd">./docker/push.sh</span> &lt;账号&gt; 1.0.0 --latest             <span class="cm"># 推送并更新 latest</span>
 
-<span class="cm"># ---- 服务器：compose 拉取 + 启动 ----</span>
+<span class="cm"># ---- 服务器：首次先解包，之后 compose 拉取 + 启动 ----</span>
+<span class="cmd">cd</span> /vol1/1000/app &amp;&amp; <span class="cmd">tar</span> -xzf bizlens-deploy.tar.gz &amp;&amp; <span class="cmd">chmod</span> +x docker/*.sh
 <span class="cmd">docker</span> login -u &lt;账号&gt;
 <span class="cmd">cp</span> docker/.env.example docker/.env &amp;&amp; <span class="cmd">vi</span> docker/.env
-<span class="cmd">./docker/run.sh</span>                                  <span class="cm"># 拉 latest 启动（内部就是 compose）</span>
-<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>                <span class="cm"># 指定版本（回滚）</span>
-<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">./docker/run.sh</span>
+<span class="cmd">bash</span> docker/run.sh                                  <span class="cm"># 拉 latest 启动（内部就是 compose）</span>
+<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">bash</span> docker/run.sh                <span class="cm"># 指定版本（回滚）</span>
+<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">bash</span> docker/run.sh
 <span class="cmd">cd</span> docker
 <span class="cmd">docker</span> compose ps
 <span class="cmd">docker</span> compose logs -f
