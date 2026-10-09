@@ -4,15 +4,15 @@
 # 没有 Docker Desktop 的 Windows 机器：把 jar 传到装了 Docker 的服务器，在服务器上执行本脚本。
 #
 # 用法：
-#   REGISTRY=<DockerHub账号> ./docker/build.sh
-#   REGISTRY=<账号> TAG=1.0.0 ./docker/build.sh
-#   REGISTRY=<账号> BASE_IMAGE=eclipse-temurin:8-jre ./docker/build.sh
+#   REGISTRY=zzzoooo2 ./docker/build.sh
+#   REGISTRY=zzzoooo2 TAG=1.0.0 ./docker/build.sh
+#   REGISTRY=zzzoooo2 BASE_IMAGE=eclipse-temurin:8-jre ./docker/build.sh
 # 可覆盖的参数：REGISTRY / IMAGE / TAG / BASE_IMAGE
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# REGISTRY 是命名空间或自建仓库前缀：Docker Hub 填账号名（如 myid），自建仓库填完整前缀（如 harbor.corp.local/bizlens）
+# REGISTRY 是命名空间或自建仓库前缀：Docker Hub 填账号名（如 zzzoooo2），自建仓库填完整前缀（如 harbor.corp.local/bizlens）
 REGISTRY="${REGISTRY:-}"
 IMAGE="${IMAGE:-bizlens-ai}"
 TAG="${TAG:-latest}"
@@ -22,7 +22,7 @@ BASE_IMAGE="${BASE_IMAGE:-eclipse-temurin:8-jre}"
 # 1. 构建时就把名字定成最终要推的名字，避免构建与推送两处名字对不上
 if [ -z "$REGISTRY" ]; then
     echo "错误：未指定镜像命名空间 REGISTRY（Docker Hub 账号名）。" >&2
-    echo "例如： REGISTRY=mydockerid ./docker/build.sh" >&2
+    echo "例如： REGISTRY=zzzoooo2 ./docker/build.sh" >&2
     exit 1
 fi
 FULL_IMAGE="$REGISTRY/$IMAGE:$TAG"

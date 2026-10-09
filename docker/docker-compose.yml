@@ -1,42 +1,48 @@
-# BizLens AI 单容器服务：前后端同源，只暴露一个端口
+# BizLens AI 单容器服务：前后端同源
 #
-# 用法（在本目录下执行；.env 与本文件同目录，compose 会自动读取其中的变量）：
+# 【全部配置写死在本文件里，不使用 .env】——改环境就改这里。
+#
+# 用法（在本目录下执行）：
 #   docker compose pull && docker compose up -d
 #   docker compose ps
 #   docker compose logs -f
 #   docker compose down
-# 或直接用包装脚本（在仓库根目录）：./docker/run.sh
+# 或直接用包装脚本（仓库根目录）：bash docker/run.sh
 #
-# 说明：这里只声明需要的环境变量，不用 env_file 整体注入 ——
-#       这样变量值统一来自本目录的 .env（经 compose 解析），值里不会混入 Windows 换行符。
+# 网络用 host 模式：容器与宿主机共用网络栈，所以
+#   1) REDIS_HOST 直接写 127.0.0.1 就能连到宿主机上的 Redis（容器里的 127.0.0.1 即宿主机）；
+#   2) 服务直接监听宿主机的 10610，浏览器访问 http://zzzoooo2.top:10610/；
+#   3) host 模式下 ports 映射无效，故本文件没有 ports 段。
 services:
   bizlens-ai:
-    # ：TAG 决定拉取哪个版本，回滚时改 .env 里的 TAG 再 up -d 即可
-    image: ${REGISTRY:?请在 docker/.env 中设置 REGISTRY 为你的 Docker Hub 账号}/bizlens-ai:${TAG:-latest}
+    # 回滚：把 :latest 改成要回到的标签（如 20261008-1712）后 pull + up -d
+    image: zzzoooo2/bizlens-ai:latest
     container_name: bizlens-ai
+    network_mode: host
     restart: unless-stopped
-    ports:
-      # 左边是宿主机端口，右边是容器端口（容器内固定 10610）
-      - "${HOST_PORT:-10610}:10610"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?请在 docker/.env 中设置 DATABASE_URL}
-      DATABASE_USERNAME: ${DATABASE_USERNAME:?请在 docker/.env 中设置 DATABASE_USERNAME}
-      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?请在 docker/.env 中设置 DATABASE_PASSWORD}
-      REDIS_HOST: ${REDIS_HOST:?请在 docker/.env 中设置 REDIS_HOST}
-      REDIS_PORT: ${REDIS_PORT:?请在 docker/.env 中设置 REDIS_PORT}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      AES_KEY: ${AES_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-}
-      AI_EMBEDDING_ENABLED: ${AI_EMBEDDING_ENABLED:-false}
-      AI_EMBEDDING_BASE_URL: ${AI_EMBEDDING_BASE_URL:-}
-      AI_EMBEDDING_API_KEY: ${AI_EMBEDDING_API_KEY:-}
-      # 这两个给上与 jar 内 application.yml 相同的默认值，避免".env 里留空"覆盖掉默认模型名
-      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
-      AI_EMBEDDING_DIMENSION: ${AI_EMBEDDING_DIMENSION:-1536}
-      BIZLENS_GIT_PROXY: ${BIZLENS_GIT_PROXY:-}
-      BIZLENS_GIT_NO_PROXY: ${BIZLENS_GIT_NO_PROXY:-}
-      # 追加启动参数，如 --server.port=8080（改容器端口时要同步改上面的端口映射与 Dockerfile 的健康检查）
-      PARAMS: ${PARAMS:-}
+      # ---- 数据库（写死；该文件已提交进 git，换口令要同时改这里和数据库）----
+      DATABASE_URL: "jdbc:postgresql://zzzoooo2.top:53309/bizlens"
+      DATABASE_USERNAME: "root"
+      DATABASE_PASSWORD: "zzz@8866"
+      # ---- Redis 跑在宿主机 127.0.0.1:56379 ----
+      REDIS_HOST: "127.0.0.1"
+      REDIS_PORT: "56379"
+      REDIS_PASSWORD: "zzz@8866"
+      # ---- 密钥：沿用代码里的兜底值，保证已加密落库的 Git 令牌仍能解开、现有登录态不失效 ----
+      AES_KEY: "bizlens-ai-dev-key-2026"
+      JWT_SECRET: "bizlens-dev-only-change-me"
+      # ---- 语义召回：不启用则只走关键词召回 ----
+      AI_EMBEDDING_ENABLED: "false"
+      AI_EMBEDDING_BASE_URL: ""
+      AI_EMBEDDING_API_KEY: ""
+      AI_EMBEDDING_MODEL: "text-embedding-3-small"
+      AI_EMBEDDING_DIMENSION: "1536"
+      # ---- 索引克隆的出网代理：host 网络下容器能看到宿主机的 7890；内网 Git 走 NO_PROXY ----
+      BIZLENS_GIT_PROXY: "http://127.0.0.1:7890"
+      BIZLENS_GIT_NO_PROXY: "git.inksdev.com,192.168.99.92,localhost,127.0.0.1,zzzoooo2.top"
+      # ---- 追加启动参数，如 --server.port=8080（改端口要同步改 Dockerfile 里的健康检查端口）----
+      PARAMS: ""
     # 健康检查沿用镜像内的 HEALTHCHECK（调 /api/system/health）；
     # 注意该探针在数据库不可用时返回 DEGRADED 但 HTTP 仍为 200，所以 healthy 只代表 Web 服务在响应
     logging:

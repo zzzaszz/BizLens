@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # 把已构建好的镜像推送到镜像仓库（默认 Docker Hub 私有仓库）
-# 推送前需先登录：docker login -u <DockerHub账号>（密码用 Access Token）
+# 推送前需先登录：docker login -u zzzoooo2（密码用 Access Token）
 #
 # 用法：
-#   ./docker/push.sh <DockerHub账号> [标签]
-#   ./docker/push.sh myid 1.0.0
-#   ./docker/push.sh myid 1.0.0 --latest      # 同时把 latest 也指向该版本
-#   REGISTRY=<账号> TAG=1.0.0 ./docker/push.sh
+#   ./docker/push.sh zzzoooo2 [标签]
+#   ./docker/push.sh zzzoooo2 1.0.0
+#   ./docker/push.sh zzzoooo2 1.0.0 --latest      # 同时把 latest 也指向该版本
+#   REGISTRY=zzzoooo2 TAG=1.0.0 ./docker/push.sh
 set -euo pipefail
 
 IMAGE="${IMAGE:-bizlens-ai}"
@@ -46,8 +46,8 @@ PUSH_TAG="${PUSH_TAG:-${TAG:-latest}}"
 # 1. 命名空间：Docker Hub 不接受没有命名空间（账号/组织）的镜像名
 if [ -z "$ACCOUNT" ]; then
     echo "错误：未指定 Docker Hub 账号（镜像命名空间）。" >&2
-    echo "用法：./docker/push.sh <DockerHub账号> [标签]" >&2
-    echo "例如：./docker/push.sh myid 1.0.0" >&2
+    echo "用法：./docker/push.sh zzzoooo2 [标签]" >&2
+    echo "例如：./docker/push.sh zzzoooo2 1.0.0" >&2
     exit 1
 fi
 FULL_IMAGE="$ACCOUNT/$IMAGE:$PUSH_TAG"
@@ -70,7 +70,7 @@ fi
 echo "==> docker push $FULL_IMAGE"
 if ! docker push "$FULL_IMAGE"; then
     echo "推送失败。若提示 unauthorized/denied，请先登录（密码用 Access Token，不是账号密码）：" >&2
-    echo "  docker login -u <DockerHub账号>" >&2
+    echo "  docker login -u zzzoooo2" >&2
     echo "若提示 repository does not exist，请先在 Docker Hub 网页端创建该私有仓库。" >&2
     exit 1
 fi

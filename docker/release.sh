@@ -2,18 +2,18 @@
 # 一条命令完成：打包 jar -> 构建镜像 -> 推送到 Docker Hub 私有仓库
 # 需要本机装有 Docker；Windows 上即 Docker Desktop 处于运行状态。
 # 本机没有 Docker 时不要用本脚本：把 jar 传到服务器，在服务器上执行
-#   ./docker/release.sh <账号> --skip-package
+#   ./docker/release.sh zzzoooo2 --skip-package
 #
 # 用法：
-#   ./docker/release.sh <DockerHub账号>              # 标签自动生成：时间戳 20261009-1431
-#   ./docker/release.sh <账号> --git                 # 标签用 git 提交短哈希，可追溯到代码
-#   ./docker/release.sh <账号> 1.0.0                 # 指定标签
-#   ./docker/release.sh <账号> 1.0.0 --skip-package  # 不重新打包，用现有 jar
-#   ./docker/release.sh <账号> 1.0.0 --no-push       # 只打包 + 构建，不推送
+#   ./docker/release.sh zzzoooo2              # 标签自动生成：时间戳 20261009-1431
+#   ./docker/release.sh zzzoooo2 --git                 # 标签用 git 提交短哈希，可追溯到代码
+#   ./docker/release.sh zzzoooo2 1.0.0                 # 指定标签
+#   ./docker/release.sh zzzoooo2 1.0.0 --skip-package  # 不重新打包，用现有 jar
+#   ./docker/release.sh zzzoooo2 1.0.0 --no-push       # 只打包 + 构建，不推送
 #
 # 说明：Docker 自身不会生成版本号（不带 -t 只会得到一个无名镜像，无法推送），
 #       所以标签由本脚本生成。自动生成时还会同时把 latest 指向该版本，方便服务器直接拉取。
-# 也可用环境变量传：REGISTRY=<账号> TAG=1.0.0 ./docker/release.sh
+# 也可用环境变量传：REGISTRY=zzzoooo2 TAG=1.0.0 ./docker/release.sh
 # 逐步执行见 docker/package.sh、docker/build.sh、docker/push.sh
 set -euo pipefail
 
@@ -57,9 +57,9 @@ RELEASE_TAG="${RELEASE_TAG:-${TAG:-}}"
 
 if [ -z "$ACCOUNT" ]; then
     echo "错误：未指定 Docker Hub 账号（镜像命名空间）。" >&2
-    echo "用法：./docker/release.sh <DockerHub账号> [标签]" >&2
-    echo "例如：./docker/release.sh myid            # 标签自动生成" >&2
-    echo "      ./docker/release.sh myid 1.0.0      # 指定标签" >&2
+    echo "用法：./docker/release.sh zzzoooo2 [标签]" >&2
+    echo "例如：./docker/release.sh zzzoooo2            # 标签自动生成" >&2
+    echo "      ./docker/release.sh zzzoooo2 1.0.0      # 指定标签" >&2
     exit 1
 fi
 

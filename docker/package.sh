@@ -55,7 +55,7 @@ fi
 JAR_REL="svc/target/$(basename "$JAR")"
 
 echo "==> 5/5 生成部署包 $BUNDLE"
-# 只带服务器构建与运行需要的文件；docker/.env 是各环境自己的配置，不进包
+# 只带服务器构建与运行需要的文件（配置都写死在 docker-compose.yml 里，不再有 .env）
 rm -f "$BUNDLE"
 cd "$ROOT"
 tar -czf "$BUNDLE" \
@@ -77,13 +77,15 @@ docker/push.sh
 docker/release.sh
 docker/run.sh
 docker/docker-compose.yml
-docker/.env.example
 "
 CONTENT="$(tar -tzf "$BUNDLE")"
 MISSING=""
 for f in $REQUIRED; do
     echo "$CONTENT" | grep -qx "$f" || MISSING="$MISSING $f"
 done
+# 说明文档的文件名含中文，tar 列表在 Windows 控制台下的编码与脚本里的 UTF-8 字符串不一致，
+# 直接比对会误报，这里改用后缀判断
+echo "$CONTENT" | grep -q '^docker/.*\.html$' || MISSING="$MISSING docker/部署说明.html"
 if [ -n "$MISSING" ]; then
     echo "错误：部署包缺少文件:$MISSING" >&2
     exit 1
@@ -102,7 +104,7 @@ echo
 echo "② 服务器：解包并确认到位（不能跳——只传压缩包，脚本不会自己出现）"
 echo "   ssh -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST 'cd $DEPLOY_DIR && tar -xzf $(basename "$BUNDLE") && chmod +x docker/*.sh && ls -l docker/release.sh docker/docker-compose.yml svc/target/*.jar'"
 echo
-echo "③ 服务器：改配置后构建启动（bash 调用，不依赖脚本执行位）"
-echo "   cd $DEPLOY_DIR && cp docker/.env.example docker/.env && vi docker/.env"
-echo "   bash docker/release.sh <DockerHub账号> --skip-package"
+echo "③ 服务器：构建启动（配置已写死在 docker/docker-compose.yml，不需要 .env）"
+echo "   cd $DEPLOY_DIR"
+echo "   bash docker/release.sh zzzoooo2 --skip-package"
 echo "   bash docker/run.sh"
