@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BizLens AI 容器部署说明（打包 / 推送 Docker Hub 私库 / 拉取运行）</title>
+<title>BizLens AI 部署说明（打包 / 构建推送 / 拉取运行）</title>
 <style>
   :root {
     --bg: #f6f7f9;
@@ -33,16 +33,24 @@
   }
   .wrap { max-width: 980px; margin: 0 auto; }
 
-  header.top { padding: 42px 0 26px; border-bottom: 1px solid var(--line); }
+  header.top { padding: 42px 0 22px; }
   header.top h1 { margin: 0 0 10px; font-size: 27px; letter-spacing: .3px; }
   header.top p.lead { margin: 0; color: var(--ink-2); font-size: 15px; }
   header.top .meta { margin-top: 14px; color: var(--ink-3); font-size: 13px; }
   header.top .meta span + span::before { content: "·"; margin: 0 8px; color: var(--line); }
 
-  nav.toc {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 16px 20px; margin: 24px 0 34px;
+  .quick { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: var(--radius); padding: 18px 20px 20px; margin: 0 0 26px; }
+  .quick h2 { margin: 0 0 4px; font-size: 17px; }
+  .quick p.sub { margin: 0 0 6px; font-size: 13.5px; color: var(--ink-3); }
+  .quick .cols { display: flex; flex-wrap: wrap; gap: 14px; }
+  .quick .cols > div { flex: 1 1 320px; min-width: 0; }
+  .quick h3 { margin: 12px 0 4px; font-size: 13.5px; color: var(--ink-2); font-weight: 600; }
+  .quick h3 .badge {
+    font: 500 11.5px/18px "Segoe UI", sans-serif; color: var(--brand);
+    background: var(--brand-soft); border-radius: 4px; padding: 1px 6px; margin-left: 6px;
   }
+
+  nav.toc { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 20px; margin: 0 0 34px; }
   nav.toc h2 { margin: 0 0 10px; font-size: 14px; color: var(--ink-2); font-weight: 600; }
   nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 32px; }
   nav.toc li { margin: 4px 0; }
@@ -51,51 +59,29 @@
 
   section { margin: 0 0 40px; }
   h2.sec { display: flex; align-items: center; gap: 10px; font-size: 20px; margin: 0 0 6px; padding-top: 8px; }
-  h2.sec .num {
-    flex: 0 0 28px; height: 28px; border-radius: 8px;
-    background: var(--brand); color: #fff;
-    font: 600 14px/28px "Segoe UI", sans-serif; text-align: center;
-  }
+  h2.sec .num { flex: 0 0 28px; height: 28px; border-radius: 8px; background: var(--brand); color: #fff; font: 600 14px/28px "Segoe UI", sans-serif; text-align: center; }
   h3.sub { font-size: 15px; margin: 26px 0 8px; color: var(--ink); }
-  h3.sub .tag {
-    font: 500 12px/20px "Segoe UI", sans-serif;
-    color: var(--brand); background: var(--brand-soft);
-    border-radius: 4px; padding: 1px 7px; margin-left: 8px; vertical-align: 1px;
-  }
+  h3.sub .tag { font: 500 12px/20px "Segoe UI", sans-serif; color: var(--brand); background: var(--brand-soft); border-radius: 4px; padding: 1px 7px; margin-left: 8px; vertical-align: 1px; }
+  h4.step { font-size: 14.5px; margin: 20px 0 6px; color: var(--ink); }
   p { margin: 8px 0; color: var(--ink-2); }
   p strong, li strong { color: var(--ink); }
   ul, ol.body { margin: 8px 0; padding-left: 22px; color: var(--ink-2); }
   li { margin: 5px 0; }
-  code.inl {
-    font: 13px/1.5 "Cascadia Mono", Consolas, "Courier New", monospace;
-    background: #eef0f4; border: 1px solid var(--line);
-    border-radius: 4px; padding: 1px 5px; color: #b02a37;
-  }
+  code.inl { font: 13px/1.5 "Cascadia Mono", Consolas, "Courier New", monospace; background: #eef0f4; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: #b02a37; }
 
   .flow { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 6px; }
-  .flow .node { flex: 1 1 190px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .flow .node { flex: 1 1 170px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .flow .node .k { font: 600 12px/1 "Segoe UI", sans-serif; color: var(--ink-3); letter-spacing: .5px; }
   .flow .node .t { margin: 8px 0 6px; font-weight: 600; }
   .flow .node .d { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
   .flow .arrow { align-self: center; color: var(--ink-3); font-size: 18px; }
 
   .block { position: relative; margin: 12px 0 4px; }
-  pre {
-    margin: 0; background: var(--code-bg); color: var(--code-ink);
-    border-radius: var(--radius); padding: 15px 16px; overflow-x: auto;
-    font: 13px/1.7 "Cascadia Mono", Consolas, "Courier New", monospace;
-  }
+  pre { margin: 0; background: var(--code-bg); color: var(--code-ink); border-radius: var(--radius); padding: 15px 16px; overflow-x: auto; font: 13px/1.7 "Cascadia Mono", Consolas, "Courier New", monospace; }
   pre .cm { color: #8c97ab; }
   pre .var { color: #ffd479; }
   pre .cmd { color: #7fd1b9; }
-  .copy {
-    position: absolute; top: 8px; right: 8px;
-    display: inline-flex; align-items: center; gap: 5px;
-    background: rgba(255,255,255,.10); color: #d7dfec;
-    border: 1px solid rgba(255,255,255,.18); border-radius: 6px;
-    padding: 3px 9px; font: 12px/1.6 "Microsoft YaHei", sans-serif;
-    cursor: pointer; opacity: .75;
-  }
+  .copy { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,.10); color: #d7dfec; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; padding: 3px 9px; font: 12px/1.6 "Microsoft YaHei", sans-serif; cursor: pointer; opacity: .75; }
   .copy:hover { opacity: 1; background: rgba(255,255,255,.18); }
   .copy.ok { color: #9ae6b4; border-color: rgba(154,230,180,.5); }
   .copy svg { width: 12px; height: 12px; }
@@ -120,12 +106,13 @@
   td.mono, .mono { font: 12.5px/1.6 "Cascadia Mono", Consolas, monospace; white-space: nowrap; }
   td.no { color: #b02a37; white-space: nowrap; }
   td.yes { color: #12813a; white-space: nowrap; }
+  th.center, td.center { text-align: center; }
 
   footer { margin-top: 46px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 13px; }
   @media print {
     body { background: #fff; padding: 0; }
     .copy { display: none; }
-    nav.toc { break-inside: avoid; }
+    nav.toc, .quick { break-inside: avoid; }
     section { break-inside: avoid-page; }
     pre { border: 1px solid #ccc; }
   }
@@ -135,266 +122,369 @@
 <div class="wrap">
 
 <header class="top">
-  <h1>BizLens AI 容器部署说明</h1>
-  <p class="lead">本地打好的 jar 构建成镜像、推送到 Docker Hub 私有仓库，目标机器拉取后以单容器运行。前后端同源，只需映射一个端口。</p>
+  <h1>BizLens AI 部署说明</h1>
+  <p class="lead">Windows 打包 jar；镜像在哪台机器构建取决于哪台装了 Docker——Windows 有 Docker Desktop 就在本地做，没有就交给服务器。服务器用 docker compose 启动，前后端同源，只映射一个端口。</p>
   <div class="meta">
-    <span>适用版本 0.0.1-SNAPSHOT</span>
+    <span>版本 0.0.1-SNAPSHOT</span>
     <span>容器端口 10610</span>
     <span>基础镜像 eclipse-temurin:8-jre</span>
-    <span>编写日期 2026-10-09</span>
+    <span>服务器 zzzoooo2.top:19992 → /vol1/1000/app</span>
+    <span>2026-10-09</span>
   </div>
 </header>
+
+<!-- ============ 快速开始 ============ -->
+<div class="quick">
+  <h2>快速开始</h2>
+  <p class="sub">前提：Docker Hub 已建好私有仓库 <code class="inl">&lt;账号&gt;/bizlens-ai</code>，用到 <code class="inl">docker</code> 的机器都先执行过 <code class="inl">docker login -u &lt;账号&gt;</code>（密码填 Access Token）。</p>
+  <div class="cols">
+    <div>
+      <h3>路径 A：Windows 有 Docker Desktop<span class="badge">最省事</span></h3>
+<pre><span class="cm"># Windows，Git Bash，仓库根目录：打包 + 构建 + 推送</span>
+<span class="cm"># 标签可省略，自动用时间戳（如 20261009-1435）并同时更新 latest</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt;
+
+<span class="cm"># 服务器：compose 拉取 + 启动（latest 已指向刚才那版）</span>
+<span class="cmd">./docker/run.sh</span></pre>
+    </div>
+    <div>
+      <h3>路径 B：Windows 没有 Docker<span class="badge">不需要装</span></h3>
+<pre><span class="cm"># 1) Windows：只打包</span>
+<span class="cmd">bash</span> docker/package.sh
+
+<span class="cm"># 2) 把 jar 传到服务器（细节见第 3 节）</span>
+<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" \
+    zzzoooo2@zzzoooo2.top:/vol1/1000/app/
+
+<span class="cm"># 3) 服务器：构建 + 推送（标签同样自动生成）</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package
+
+<span class="cm"># 4) 服务器（同机）：compose 拉取 + 启动</span>
+<span class="cmd">./docker/run.sh</span></pre>
+    </div>
+  </div>
+</div>
 
 <nav class="toc">
   <h2>目录</h2>
   <ol>
-    <li><a href="#s1">总览：四步流程</a></li>
-    <li><a href="#s2">一次性准备：私有仓库与登录</a></li>
-    <li><a href="#s3">第一步：本地打包并送到构建机</a></li>
-    <li><a href="#s4">第二步：构建镜像</a></li>
-    <li><a href="#s5">第三步：推送到私有仓库</a></li>
-    <li><a href="#s6">第四步：目标机器拉取并启动</a></li>
+    <li><a href="#s1">总览：两条路径怎么选</a></li>
+    <li><a href="#s2">一次性准备</a></li>
+    <li><a href="#s3">打包 jar（Windows，必做）</a></li>
+    <li><a href="#s4">构建镜像（在装了 Docker 的机器上）</a></li>
+    <li><a href="#s5">推送到私有仓库</a></li>
+    <li><a href="#s6">服务器：用 docker compose 启动</a></li>
     <li><a href="#s7">验证与日常运维</a></li>
     <li><a href="#s8">版本升级与回滚</a></li>
     <li><a href="#s9">常见问题</a></li>
-    <li><a href="#s10">命令速查</a></li>
+    <li><a href="#s10">脚本职责与命令速查</a></li>
   </ol>
 </nav>
 
 <!-- ============ 1 ============ -->
 <section id="s1">
-  <h2 class="sec"><span class="num">1</span>总览：四步流程</h2>
-  <p>打包在本地做（需要 Node/pnpm 与 JDK/Maven），构建镜像在装了 Docker 的机器上做（<strong>不需要 JDK 和 Maven</strong>，镜像内不编译任何代码，只把已打好的 jar 复制进去）。</p>
+  <h2 class="sec"><span class="num">1</span>总览：两条路径怎么选</h2>
+  <p>规则只有一条：<strong>打包必须在有 Node/JDK/Maven 的 Windows 上做，构建镜像必须在装了 Docker 的机器上做</strong>。这两件事未必在同一台机器。</p>
+
+  <table>
+    <caption>两条路径对比</caption>
+    <tr><th>路径</th><th>Windows 需要什么</th><th>构建在哪</th><th>适合</th></tr>
+    <tr>
+      <td><strong>A</strong></td>
+      <td>Git Bash、Node + pnpm、JDK 8、Maven、<strong>Docker Desktop</strong></td>
+      <td>Windows</td>
+      <td>开发机自己装了 Docker Desktop，一条命令出镜像</td>
+    </tr>
+    <tr>
+      <td><strong>B</strong></td>
+      <td>Git Bash、Node + pnpm、JDK 8、Maven<br>（<strong>不需要 Docker</strong>）</td>
+      <td>服务器（或任意装了 Docker 的机器）</td>
+      <td>开发机不给装 Docker Desktop，或公司统一在服务器上出镜像</td>
+    </tr>
+  </table>
 
   <div class="flow">
     <div class="node">
-      <div class="k">本地</div>
+      <div class="k">Windows</div>
       <div class="t">打包 jar</div>
-      <div class="d"><code class="inl">bash docker/package.sh</code><br>前端构建产物与 prod 配置一并并入 jar。</div>
+      <div class="d">前端构建产物 + prod 配置并入 jar，产出单个可部署 jar。<strong>两条路径都要做。</strong></div>
     </div>
     <div class="arrow">&rarr;</div>
     <div class="node">
-      <div class="k">有 Docker 的机器</div>
+      <div class="k">Windows 或 服务器</div>
       <div class="t">构建镜像</div>
-      <div class="d"><code class="inl">REGISTRY=&lt;账号&gt; ./docker/build.sh</code><br>把 jar 装进 JDK8 基础镜像。</div>
+      <div class="d">把 jar 装进 JDK8 基础镜像，镜像内按需补装 git。<strong>哪台有 Docker 就在哪台做。</strong></div>
     </div>
     <div class="arrow">&rarr;</div>
     <div class="node">
-      <div class="k">Docker Hub 私有仓库</div>
-      <div class="t">推送镜像</div>
-      <div class="d">先 <code class="inl">docker login</code>，由 build.sh 自动 push。</div>
+      <div class="k">同上</div>
+      <div class="t">推送私库</div>
+      <div class="d">推到 Docker Hub 私有仓库，带版本标签。<code class="inl">push.sh</code> 负责。</div>
     </div>
     <div class="arrow">&rarr;</div>
     <div class="node">
-      <div class="k">目标机器</div>
-      <div class="t">拉取并启动</div>
-      <div class="d"><code class="inl">./docker/run.sh</code><br>映射一个端口，浏览器直接访问。</div>
+      <div class="k">服务器</div>
+      <div class="t">compose 拉取并启动</div>
+      <div class="d">docker compose 拉取镜像并起容器，映射一个端口，浏览器直接访问。</div>
     </div>
   </div>
 
-  <table>
-    <caption>各环节需要什么</caption>
-    <tr><th>机器</th><th>需要安装</th><th>做的事</th></tr>
-    <tr><td>本地开发机</td><td>Node + pnpm、JDK 8、Maven</td><td><code>package.sh</code> 打包</td></tr>
-    <tr><td>构建机</td><td>Docker（含 daemon）、能访问 Docker Hub</td><td><code>build.sh</code> 构建并推送</td></tr>
-    <tr><td>目标运行机</td><td>Docker、能访问 Docker Hub 与数据库/Redis</td><td><code>run.sh</code> 拉取并启动</td></tr>
-  </table>
-
   <div class="note tip">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
-    <p>构建机与目标机可以是同一台。本地开发机若装了 Docker Desktop（需启动 daemon），也可以直接在本地构建并推送，再在目标机上拉取。</p>
+    <p>构建镜像不需要 JDK、Maven 或 Node——镜像里不编译任何东西，只把 jar 复制进去。所以服务器上构建同样轻量，只要它能访问 Docker Hub 与基础镜像。</p>
+    <p>反过来，Windows 上构建出的镜像与在服务器上构建的完全等价（都是 Linux 容器镜像，与构建机宿主系统无关）。</p>
   </div>
 </section>
 
 <!-- ============ 2 ============ -->
 <section id="s2">
-  <h2 class="sec"><span class="num">2</span>一次性准备：私有仓库与登录</h2>
+  <h2 class="sec"><span class="num">2</span>一次性准备</h2>
 
-  <h3 class="sub">2.1 在 Docker Hub 网页端新建私有仓库</h3>
+  <h3 class="sub">2.1 在 Docker Hub 建私有仓库</h3>
   <ol class="body">
     <li>登录 <code class="inl">hub.docker.com</code>；</li>
-    <li>进入 <strong>Create repository</strong>；</li>
+    <li>Create repository；</li>
     <li>Name 填 <code class="inl">bizlens-ai</code>，<strong>Visibility 选 Private</strong>；</li>
-    <li>创建后仓库全名为 <code class="inl">&lt;账号&gt;/bizlens-ai</code>，后面 <code class="inl">REGISTRY</code> 就填这个 <code class="inl">&lt;账号&gt;</code>。</li>
+    <li>仓库全名即 <code class="inl">&lt;账号&gt;/bizlens-ai</code>，脚本参数里的账号就是它。</li>
   </ol>
-  <p>免费账号可创建的私有仓库数量有限（以 Docker Hub 当前套餐为准）。若命名为别的名字，后续用 <code class="inl">IMAGE=</code> 传入即可。</p>
 
   <h3 class="sub">2.2 生成 Access Token</h3>
   <p>Docker Hub 的 CLI 登录<strong>不再接受账号密码</strong>，密码位置必须填 Token：</p>
   <ol class="body">
-    <li>Account Settings → <strong>Personal access tokens</strong> → Generate new token；</li>
-    <li>权限选 <strong>Read &amp; Write</strong>（只能拉取的机器可给 Read）；</li>
-    <li>生成后<strong>立即复制保存</strong>，页面关闭后不再显示。</li>
+    <li>Account Settings → Personal access tokens → Generate new token；</li>
+    <li>权限选 <strong>Read &amp; Write</strong>（只拉取的服务器可给 Read）；</li>
+    <li>生成后立即复制保存，页面关闭后不再显示。</li>
   </ol>
 
-  <h3 class="sub">2.3 登录（构建机与目标机都要做一次）</h3>
-<pre><span class="cmd">docker</span> login -u &lt;DockerHub账号&gt;
-<span class="cm"># 提示 Password 时粘贴上一步的 Access Token，不是账号密码</span>
-<span class="cm"># 登录成功提示：Login Succeeded</span></pre>
+  <h3 class="sub">2.3 登录：用到 docker 的机器都要做一次</h3>
+<pre><span class="cmd">docker</span> login -u &lt;账号&gt;
+<span class="cm"># Password 处粘贴 Access Token，成功提示 Login Succeeded</span></pre>
+
+  <h3 class="sub">2.4 路径 B 额外准备：Windows 的打包环境 + 服务器</h3>
+  <table>
+    <tr><th>机器</th><th>需要安装</th></tr>
+    <tr><td>Windows</td><td>Git Bash（Git for Windows 自带）、Node 18/20 + pnpm、JDK 8、Maven 3.8+</td></tr>
+    <tr><td>服务器</td><td>Docker + Docker Compose；仓库代码（<code>git clone</code>）用于拿到 <code>docker/</code> 脚本与 compose 文件</td></tr>
+  </table>
 
   <div class="note warn">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>私有仓库的安全边界要说清楚：<strong>镜像内含后端 class 文件与前端产物，被授权拉取的人可以解包查看</strong>。私有仓库只保证"未授权拉不到"，不等于加密。本方案的数据库口令、Redis 口令、AES 密钥、JWT 密钥全部在运行时通过环境变量注入，不进镜像、不进仓库。</p>
+    <p>私有仓库的安全边界：<strong>镜像内含后端 class 文件、前端产物与开发配置，被授权拉取的人可以解包查看</strong>。私有仓库只保证"未授权拉不到"，不等于加密。本方案的数据库口令、Redis 口令、AES 密钥、JWT 密钥全部在运行时通过环境变量注入，不进镜像。</p>
   </div>
 </section>
 
 <!-- ============ 3 ============ -->
 <section id="s3">
-  <h2 class="sec"><span class="num">3</span>第一步：本地打包并送到构建机</h2>
+  <h2 class="sec"><span class="num">3</span>打包 jar（Windows，必做）</h2>
+  <p>两条路径都要先打包。路径 A 由 <code class="inl">release.sh</code> 自动完成，路径 B 需要手工执行并把产物传到服务器。</p>
 
-<pre><span class="cm"># 本地执行（Windows Git Bash 或 Linux 均可）</span>
-<span class="cmd">bash</span> docker/package.sh
+<pre><span class="cm"># Windows，Git Bash，仓库根目录</span>
+<span class="cmd">bash</span> docker/package.sh</pre>
 
-<span class="cm"># 产物：svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar（约 140MB）</span>
-<span class="cm"># 该 jar 内已含：后端 + 前端静态资源 + application-prod.yml</span></pre>
-
-  <p>脚本会依次：构建前端 → 把 <code class="inl">web/dist</code> 复制进 <code class="inl">src/main/resources/static</code> → <code class="inl">mvn package</code> → 清理临时的 static 目录。结束时打印产物路径。</p>
-
-  <p>构建机需要的是整个仓库加这个 jar。<strong>推荐用 git 拉仓库</strong>（脚本换行符不易出错），jar 单独传：</p>
-
-<pre><span class="cm"># 构建机上</span>
-<span class="cmd">git</span> clone &lt;仓库地址&gt; /data/bizlens &amp;&amp; <span class="cmd">cd</span> /data/bizlens
-<span class="cmd">mkdir</span> -p svc/target
-
-<span class="cm"># 本地（Windows Git Bash）把 jar 传上去</span>
-<span class="cmd">scp</span> svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar &lt;用户&gt;@&lt;构建机&gt;:/data/bizlens/svc/target/</pre>
+  <p>脚本依次：<code class="inl">pnpm install --frozen-lockfile</code> → <code class="inl">pnpm run build</code> → 把 <code class="inl">web/dist</code> 复制进 <code class="inl">svc/src/main/resources/static</code> → <code class="inl">mvn -pl svc -am clean package -DskipTests</code> → 清理临时的 static 目录。</p>
 
   <table>
-    <caption>构建镜像需要的文件</caption>
-    <tr><th>文件</th><th>来源</th></tr>
-    <tr><td class="mono">svc/target/bizlens-ai-service-*.jar</td><td>本地打包，需手工传输（140MB，不走 git）</td></tr>
-    <tr><td class="mono">svc/Dockerfile</td><td>随仓库</td></tr>
-    <tr><td class="mono">svc/entrypoint.sh</td><td>随仓库</td></tr>
-    <tr><td class="mono">svc/.dockerignore</td><td>随仓库</td></tr>
-    <tr><td class="mono">docker/*.sh、docker/.env.example</td><td>随仓库</td></tr>
+    <caption>产物</caption>
+    <tr><th>路径</th><th>内容</th></tr>
+    <tr><td class="mono">svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar</td><td>后端 + 前端静态资源 + <code>application-prod.yml</code>，约 140MB</td></tr>
+    <tr><td class="mono">web/dist/</td><td>前端构建中间产物，已在 .gitignore 中</td></tr>
   </table>
 
-  <p>生产配置 <code class="inl">svc/src/main/resources/application-prod.yml</code> 是源码文件，已在打包时进入 jar，不需要单独传输。</p>
+  <h3 class="sub">路径 B：把 jar 传到服务器</h3>
+<pre><span class="cm"># 服务器：在部署目录拉仓库（脚本与配置由此获得）</span>
+<span class="cmd">cd</span> /vol1/1000/app
+<span class="cmd">git</span> clone &lt;仓库地址&gt; .
+<span class="cmd">mkdir</span> -p svc/target      <span class="cm"># jar 的落点；git 不跟踪空目录，必须手工建</span>
+<span class="cmd">chmod</span> +x docker/*.sh
+
+<span class="cm"># Windows：把 jar 传上去</span>
+<span class="cm">#   -O 用旧版 SCP 协议（NAS / 老 OpenSSH 的 SFTP 子系统不可用时需要）</span>
+<span class="cm">#   -v 打印详细过程，排查连不上、权限问题时很有用；-P 大写指定 SSH 端口</span>
+<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" zzzoooo2@zzzoooo2.top:/vol1/1000/app/</pre>
 
   <div class="note warn">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>若不用 git、改用 U 盘或网盘传 <code class="inl">.sh</code> 文件，务必确认换行符是 <strong>LF</strong> 而不是 Windows 的 CRLF——CRLF 会让容器里的 <code class="inl">entrypoint.sh</code> 启动失败。检查：<code class="inl">file docker/build.sh</code>，若输出含 <code class="inl">CRLF line terminators</code>，执行 <code class="inl">sed -i 's/\r$//' docker/*.sh svc/entrypoint.sh</code>。用 git 传输不会出现这个问题。</p>
+    <p>jar 最终必须放在<strong>仓库根目录下的 <code class="inl">svc/target/</code></strong>——脚本按这个相对路径找它（Docker 构建上下文就是 <code class="inl">svc/</code>）。上面这条命令把它放在了 <code class="inl">/vol1/1000/app/</code>。若那里就是仓库根目录，二选一：传完挪一下 <code class="inl">mv /vol1/1000/app/bizlens-ai-service-*.jar /vol1/1000/app/svc/target/</code>，或把 scp 目标直接写成 <code class="inl">zzzoooo2@zzzoooo2.top:/vol1/1000/app/svc/target/</code>（该目录要先存在，见上面的 <code class="inl">mkdir -p</code>）。</p>
+    <p>若 scp 报 <code class="inl">unknown option -- O</code>，说明本机 OpenSSH 太老（<code class="inl">-O</code> 需 9.0+），去掉该参数即可。</p>
+  </div>
+
+  <div class="note tip">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
+    <p>只传 jar 即可，<code class="inl">docker/</code> 下的脚本通过 <code class="inl">git clone</code> 获得（换行符自然是 LF）。打包会把前端产物临时写进 <code class="inl">src/main/resources/static</code>，结束即删除，<code class="inl">git status</code> 不会留残留。</p>
   </div>
 </section>
 
 <!-- ============ 4 ============ -->
 <section id="s4">
-  <h2 class="sec"><span class="num">4</span>第二步：构建镜像</h2>
+  <h2 class="sec"><span class="num">4</span>构建镜像（在装了 Docker 的机器上）</h2>
 
-<pre><span class="cm"># 构建机上，仓库根目录执行；<账号> 换成你的 Docker Hub 账号</span>
-<span class="cmd">chmod</span> +x docker/*.sh
+  <h3 class="sub">路径 A：Windows 有 Docker Desktop</h3>
+  <p>确认 Docker Desktop 已启动（托盘图标运行中），然后在仓库根目录：</p>
+<pre><span class="cm"># 打包 + 构建 + 推送，一条命令；标签自动生成</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt;
+
+<span class="cm"># 若 ./ 方式提示没有执行权限，就用 bash 显式调用</span>
+<span class="cmd">bash</span> docker/release.sh &lt;账号&gt;</pre>
+
+  <h3 class="sub">路径 B：Windows 无 Docker Desktop，在服务器上构建</h3>
+  <p>jar 已在 <code class="inl">svc/target/</code> 下（见第 3 节），在<strong>服务器</strong>的仓库根目录：</p>
+<pre><span class="cm"># 用现成 jar 构建 + 推送，不重新打包</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package</pre>
+  <div class="note ok">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+    <p><code class="inl">--skip-package</code> 是关键：服务器上没有 Node/JDK/Maven，这个参数让脚本跳过打包，直接用传上来的 jar。服务器只要能访问 Docker Hub 即可。</p>
+  </div>
+
+  <h3 class="sub">只构建、先在本机验证<span class="tag">可选</span></h3>
+<pre><span class="cm"># 构建但不推送</span>
 <span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span>
 
-<span class="cm"># 只构建不推送，先本机验证</span>
-<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span> --no-push</pre>
+<span class="cm"># 或从零到构建、不推送（打包 + 构建）</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --no-push
 
-  <p>脚本依次做：校验 jar 存在 → 校验 jar 内确实含前端产物与生产配置 → <code class="inl">docker build</code> → <code class="inl">docker push</code>。</p>
+<span class="cm"># 构建完本机试跑（前台运行，Ctrl+C 停止；需先备好 docker/.env）</span>
+<span class="cmd">docker</span> run --rm -p 10611:10610 --env-file docker/.env &lt;账号&gt;/bizlens-ai:latest</pre>
+
+  <p><code class="inl">build.sh</code> 依次校验：镜像命名空间已指定 → jar 存在 → jar 内确实含前端产物与生产配置 → Docker daemon 可用，然后才 <code class="inl">docker build</code>。</p>
 
   <table>
-    <caption>可覆盖的参数（加在命令前，或写进 docker/.env）</caption>
+    <caption>可覆盖的参数</caption>
     <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
-    <tr><td class="mono">REGISTRY</td><td class="mono">（空，必须传）</td><td>你的 Docker Hub 账号名；自建仓库则填完整前缀，如 <code>harbor.xxx.com/bizlens</code></td></tr>
-    <tr><td class="mono">IMAGE</td><td class="mono">bizlens-ai</td><td>镜像名，需与网页端建的仓库名一致</td></tr>
-    <tr><td class="mono">TAG</td><td class="mono">latest</td><td>镜像标签，生产建议用版本号或日期</td></tr>
-    <tr><td class="mono">BASE_IMAGE</td><td class="mono">eclipse-temurin:8-jre</td><td>基础镜像（公共 JDK8 运行环境）。镜像内若没有 git，Dockerfile 会自动安装</td></tr>
+    <tr><td class="mono">REGISTRY</td><td class="mono">（空，必填）</td><td>Docker Hub 账号名；自建仓库填完整前缀，如 <code>harbor.xxx.com/bizlens</code></td></tr>
+    <tr><td class="mono">IMAGE</td><td class="mono">bizlens-ai</td><td>镜像名，须与网页端建的仓库名一致</td></tr>
+    <tr><td class="mono">TAG</td><td class="mono">（空）</td><td>标签。留空即自动生成（见下方「标签从哪来」）</td></tr>
+    <tr><td class="mono">BASE_IMAGE</td><td class="mono">eclipse-temurin:8-jre</td><td>基础镜像（公共 JDK8 运行环境）；镜像内没有 git 时 Dockerfile 会自动安装</td></tr>
   </table>
 
-  <p>不想用脚本时，等价命令：</p>
-<pre><span class="cmd">docker</span> build -f svc/Dockerfile \
-  --build-arg <span class="var">BASE_IMAGE</span>=eclipse-temurin:8-jre \
-  -t <span class="var">账号</span>/bizlens-ai:<span class="var">标签</span> \
-  svc</pre>
+  <h3 class="sub">标签从哪来</h3>
+  <p>Docker 自身不会生成版本号——<code class="inl">docker build</code> 不带 <code class="inl">-t</code> 只会产出一个没有名字的悬空镜像（只有 sha256 镜像 ID），这种镜像无法按名字推送。所以标签由 <code class="inl">release.sh</code> 生成：</p>
+  <table>
+    <caption>四种写法</caption>
+    <tr><th>命令</th><th>得到的标签</th><th>是否同时更新 latest</th></tr>
+    <tr><td class="mono">./docker/release.sh &lt;账号&gt;</td><td>自动时间戳，如 <code>20261009-1435</code></td><td class="yes">是</td></tr>
+    <tr><td class="mono">./docker/release.sh &lt;账号&gt; --git</td><td>git 提交短哈希，如 <code>0c75e8d</code></td><td class="yes">是</td></tr>
+    <tr><td class="mono">./docker/release.sh &lt;账号&gt; 1.0.0</td><td>你指定的 <code>1.0.0</code></td><td class="no">否</td></tr>
+    <tr><td class="mono">TAG=1.0.0 ./docker/release.sh &lt;账号&gt;</td><td>同上</td><td class="no">否</td></tr>
+  </table>
+  <div class="note tip">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
+    <p>自动生成的两个好处：标签<strong>天然唯一且按时间有序</strong>，回滚时一眼就能找到上一版；同时把 <code class="inl">latest</code> 指向它，服务器上直接 <code class="inl">./docker/run.sh</code> 就是最新版，不用记版本号。</p>
+    <p><code class="inl">--git</code> 适合"这个镜像到底对应哪次提交"要能查的场景；<code class="inl">latest</code> 不被更新，意味着显式发布 <code class="inl">1.0.0</code> 时不会悄悄改变服务器下次拉取的结果。</p>
+  </div>
 
   <div class="note tip">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
-    <p>构建上下文是 <code class="inl">svc/</code> 而非仓库根目录，配合 <code class="inl">svc/.dockerignore</code> 只把 jar 送进构建过程，避免把源码和几百 MB 的 <code class="inl">web/node_modules</code> 传给 Docker daemon。</p>
-  </div>
-
-  <div class="note warn">
-    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>首次构建会先拉取基础镜像（约 90MB），并在镜像内安装 git（代码索引功能需要）。网络受限时这一步可能很慢或超时，处理见常见问题。</p>
+    <p>构建上下文只有 <code class="inl">svc/</code>（配合 <code class="inl">svc/.dockerignore</code> 实际只传 jar），所以 <code class="inl">web/node_modules</code> 不会被送去 Docker，中文文件名（如本文档）也不在上下文里，不影响构建。</p>
   </div>
 </section>
 
 <!-- ============ 5 ============ -->
 <section id="s5">
-  <h2 class="sec"><span class="num">5</span>第三步：推送到私有仓库</h2>
+  <h2 class="sec"><span class="num">5</span>推送到私有仓库</h2>
+  <p>推送由 <code class="inl">push.sh</code> 负责，<code class="inl">release.sh</code> 已自动调用；只补推或换标签时才需要单独执行。</p>
 
-<pre><span class="cm"># build.sh 已包含推送；单独执行时：</span>
-<span class="cmd">docker</span> push &lt;账号&gt;/bizlens-ai:1.0.0
+<pre><span class="cm"># 推送指定标签</span>
+<span class="cmd">./docker/push.sh</span> &lt;账号&gt; 1.0.0
 
-<span class="cm"># 确认本地镜像</span>
-<span class="cmd">docker</span> images | <span class="cmd">grep</span> bizlens-ai</pre>
+<span class="cm"># 同时把 latest 指向该版本（新环境可直接拉 latest）</span>
+<span class="cmd">./docker/push.sh</span> &lt;账号&gt; 1.0.0 --latest
 
-  <h3 class="sub">标签命名建议</h3>
+<span class="cm"># 也可用环境变量传参</span>
+<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">TAG</span>=1.0.0 <span class="cmd">./docker/push.sh</span></pre>
+
+  <p>脚本会先校验：账号命名空间已指定 → Docker daemon 可用 → <strong>本地确实有这个镜像</strong>（没有会提示先跑 <code class="inl">build.sh</code>，而不是丢一个看不懂的 push 错误），然后才推送。</p>
+
+  <table>
+    <caption>push.sh 参数</caption>
+    <tr><th>参数</th><th>说明</th></tr>
+    <tr><td class="mono">&lt;账号&gt;</td><td>必填，Docker Hub 账号名</td></tr>
+    <tr><td class="mono">&lt;标签&gt;</td><td>可选，默认 <code>latest</code></td></tr>
+    <tr><td class="mono">--latest</td><td>推送后再把 <code>latest</code> 指向同一版本</td></tr>
+  </table>
+
+  <h3 class="sub">标签使用建议</h3>
   <ul>
-    <li>每次上线用<strong>唯一标签</strong>（版本号如 <code class="inl">1.0.0</code>，或日期如 <code class="inl">20261009</code>），便于回滚；</li>
-    <li>同时把 <code class="inl">latest</code> 指向当前版本，新环境可直接拉；</li>
-    <li>同名标签重复推送会<strong>覆盖</strong>仓库里的旧镜像，正在运行的容器不受影响。</li>
+    <li>日常直接用自动生成的标签——时间戳唯一且按时间有序，一次上线一个标签，回滚时好找；</li>
+    <li>要按语义版本管理就显式给 <code class="inl">1.0.0</code> 这类标签；要能查"镜像对应哪次提交"就用 <code class="inl">--git</code>；</li>
+    <li><code class="inl">latest</code> 由自动生成的发布更新，显式指定标签时<strong>不动</strong> <code class="inl">latest</code>；</li>
+    <li>同名标签重复推送会<strong>覆盖</strong>旧镜像，正在运行的容器不受影响。</li>
   </ul>
-
-<pre><span class="cm"># 一个版本打两个标签</span>
-<span class="cmd">docker</span> tag &lt;账号&gt;/bizlens-ai:1.0.0 &lt;账号&gt;/bizlens-ai:latest
-<span class="cmd">docker</span> push &lt;账号&gt;/bizlens-ai:1.0.0
-<span class="cmd">docker</span> push &lt;账号&gt;/bizlens-ai:latest</pre>
 </section>
 
 <!-- ============ 6 ============ -->
 <section id="s6">
-  <h2 class="sec"><span class="num">6</span>第四步：目标机器拉取并启动</h2>
+  <h2 class="sec"><span class="num">6</span>服务器：用 docker compose 启动</h2>
 
-  <h3 class="sub">6.1 先登录（私有仓库必须）</h3>
-<pre><span class="cmd">docker</span> login -u &lt;DockerHub账号&gt;
-<span class="cm"># Password 填 Access Token</span></pre>
-  <p>不登录直接拉取会报 <code class="inl">unauthorized: authentication required</code>。登录凭证保存在 <code class="inl">~/.docker/config.json</code>，重启机器后一般仍有效。</p>
+  <h3 class="sub">6.1 登录（私有仓库必须）</h3>
+<pre><span class="cmd">docker</span> login -u &lt;账号&gt;    <span class="cm"># Password 填 Access Token</span></pre>
+  <p>不登录直接拉取会报 <code class="inl">unauthorized: authentication required</code>。凭证保存在 <code class="inl">~/.docker/config.json</code>，重启后一般仍有效。若构建也在本机做过，这步已跳过。</p>
 
   <h3 class="sub">6.2 准备环境变量</h3>
-  <p><code class="inl">docker/.env</code> 已在 .gitignore 中，不会进仓库。</p>
 <pre><span class="cmd">cp</span> docker/.env.example docker/.env
 <span class="cmd">vi</span> docker/.env</pre>
 
   <table>
-    <caption>环境变量（必填项缺一个容器即启动失败并明确报出来）</caption>
+    <caption>环境变量（必填项缺一个，容器启动即失败并明确报出来）</caption>
     <tr><th>变量</th><th>必填</th><th>说明</th></tr>
-    <tr><td class="mono">REGISTRY</td><td class="yes">是</td><td>你的 Docker Hub 账号名，脚本据此拼镜像名</td></tr>
-    <tr><td class="mono">DATABASE_URL</td><td class="yes">是</td><td>形如 <code>jdbc:postgresql://主机:5432/bizlens</code></td></tr>
+    <tr><td class="mono">REGISTRY</td><td class="yes">是</td><td>Docker Hub 账号名，脚本据此拼镜像名</td></tr>
+    <tr><td class="mono">DATABASE_URL</td><td class="yes">是</td><td>形如 <code>jdbc:postgresql://zzzoooo2.top:53309/bizlens</code>（容器里不能写 localhost，见常见问题）</td></tr>
     <tr><td class="mono">DATABASE_USERNAME</td><td class="yes">是</td><td>数据库账号</td></tr>
     <tr><td class="mono">DATABASE_PASSWORD</td><td class="yes">是</td><td>数据库口令</td></tr>
     <tr><td class="mono">REDIS_HOST</td><td class="yes">是</td><td>Redis 地址</td></tr>
     <tr><td class="mono">REDIS_PORT</td><td class="yes">是</td><td>Redis 端口</td></tr>
     <tr><td class="mono">REDIS_PASSWORD</td><td class="no">否</td><td>可为空</td></tr>
-    <tr><td class="mono">AES_KEY</td><td class="no">建议</td><td>Git 令牌加解密密钥，32 位以上；不传会退化为源码内置开发密钥</td></tr>
-    <tr><td class="mono">JWT_SECRET</td><td class="no">建议</td><td>登录态签发密钥，32 位以上；不传会退化为源码内置开发密钥</td></tr>
+    <tr><td class="mono">AES_KEY</td><td class="no">建议</td><td>Git 令牌加解密密钥，32 位以上；不传退化为源码内置开发密钥</td></tr>
+    <tr><td class="mono">JWT_SECRET</td><td class="no">建议</td><td>登录态签发密钥，32 位以上；不传退化为源码内置开发密钥</td></tr>
     <tr><td class="mono">AI_EMBEDDING_*</td><td class="no">否</td><td>语义召回，不启用则只走关键词召回</td></tr>
     <tr><td class="mono">BIZLENS_GIT_PROXY</td><td class="no">否</td><td>索引克隆仓库的出网代理，默认直连</td></tr>
     <tr><td class="mono">BIZLENS_GIT_NO_PROXY</td><td class="no">否</td><td>不走代理的地址，<strong>内网 Git 地址必须写进来</strong>，否则会 502</td></tr>
     <tr><td class="mono">HOST_PORT</td><td class="no">否</td><td>宿主机端口，默认 <code>10610</code></td></tr>
-    <tr><td class="mono">TAG</td><td class="no">否</td><td>要拉取的镜像标签，默认 <code>latest</code></td></tr>
+    <tr><td class="mono">TAG</td><td class="no">否</td><td>要拉取的标签，默认 <code>latest</code></td></tr>
   </table>
 
   <div class="note warn">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>文件格式必须是纯 <code class="inl">KEY=VALUE</code>：<strong>不要写 <code class="inl">export</code>、不要加引号</strong>。脚本会先做一次 CR 清理再读取，但格式本身仍按此要求写。</p>
+    <p>格式必须是纯 <code class="inl">KEY=VALUE</code>：<strong>不要写 <code class="inl">export</code>、不要加引号</strong>。脚本会先做一次 CR 清理再读取，格式本身仍按此要求写。</p>
   </div>
 
-  <h3 class="sub">6.3 启动<span class="tag">推荐</span></h3>
-<pre><span class="cmd">./docker/run.sh</span>
+  <h3 class="sub">6.3 启动：docker compose<span class="tag">推荐</span></h3>
+  <p>服务由 <code class="inl">docker/docker-compose.yml</code> 定义，启动就是一条 compose 命令。<code class="inl">run.sh</code> 是它的包装（多做两件事：启动前校验环境变量、启动后等就绪）：</p>
+<pre><span class="cmd">./docker/run.sh</span>                 <span class="cm"># 校验 .env → compose pull → up -d → 等就绪</span>
+<span class="cmd">./docker/run.sh</span> --recreate      <span class="cm"># 强制重建容器</span>
 
-<span class="cm"># 换宿主机端口（10610 被占用时）</span>
-<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">./docker/run.sh</span></pre>
-  <p>脚本会：校验环境变量 → 拉取镜像 → 删除同名旧容器 → 启动新容器 → 轮询健康检查，就绪后打印访问地址。</p>
+<span class="cm"># 等价的手工 compose 命令（先 cd 到 docker/，.env 就在那里）</span>
+<span class="cmd">cd</span> docker
+<span class="cmd">docker</span> compose pull
+<span class="cmd">docker</span> compose up -d</pre>
+  <p>临时换版本或端口不必改 <code class="inl">.env</code>，命令行传入即可（优先级高于 <code class="inl">.env</code>）：</p>
+<pre><span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>    <span class="cm"># 起指定版本（回滚常用）</span>
+<span class="cmd">HOST_PORT</span>=8080 <span class="cmd">./docker/run.sh</span>       <span class="cm"># 换宿主机端口</span></pre>
 
-  <h3 class="sub">6.4 手写 docker run</h3>
-<pre><span class="cmd">docker</span> run -d \
-  --name bizlens-ai \
-  --restart unless-stopped \
-  -p 10610:10610 \
-  --env-file docker/.env \
-  &lt;账号&gt;/bizlens-ai:1.0.0</pre>
+  <h3 class="sub">6.4 compose 文件说明</h3>
+  <table>
+    <caption>docker/docker-compose.yml 关键项</caption>
+    <tr><th>项</th><th>作用</th></tr>
+    <tr><td class="mono">image</td><td>由 <code>.env</code> 的 <code>REGISTRY</code> 与 <code>TAG</code> 拼出，即 <code>&lt;账号&gt;/bizlens-ai:&lt;标签&gt;</code></td></tr>
+    <tr><td class="mono">container_name</td><td>固定为 <code>bizlens-ai</code>，所以 <code>docker logs/exec bizlens-ai</code> 也能直接用</td></tr>
+    <tr><td class="mono">ports</td><td>宿主机 <code>HOST_PORT</code> 映射到容器 <code>10610</code></td></tr>
+    <tr><td class="mono">environment</td><td>逐个列出容器需要的变量，取值统一来自 <code>.env</code>（不用 <code>env_file</code> 整体注入，避免 Windows 换行符混进值里）；必填项缺失时 compose 直接报「请在 docker/.env 中设置 xxx」</td></tr>
+    <tr><td class="mono">restart</td><td><code>unless-stopped</code>：进程崩溃或机器重启后自动拉起</td></tr>
+    <tr><td class="mono">logging</td><td>json-file 轮转，单文件 10MB、保留 3 个，避免日志长期增长占满磁盘</td></tr>
+    <tr><td class="mono">健康检查</td><td>沿用镜像内的 <code>HEALTHCHECK</code>（调 <code>/api/system/health</code>），<code>docker compose ps</code> 可见 healthy</td></tr>
+  </table>
+
+  <h3 class="sub">6.5 运维命令</h3>
+<pre><span class="cm"># 在 docker/ 目录下执行</span>
+<span class="cmd">cd</span> docker
+<span class="cmd">docker</span> compose ps          <span class="cm"># 状态 + 健康检查结果</span>
+<span class="cmd">docker</span> compose logs -f     <span class="cm"># 跟踪日志</span>
+<span class="cmd">docker</span> compose restart     <span class="cm"># 重启</span>
+<span class="cmd">docker</span> compose down        <span class="cm"># 停止并删除容器</span>
+<span class="cmd">docker</span> compose up -d       <span class="cm"># 按当前 .env 重新拉起</span></pre>
 
   <div class="note tip">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></span>
-    <p><code class="inl">-p</code> 左边是宿主机端口、右边是容器端口。容器内固定监听 <code class="inl">10610</code>，一般只改左边；前端所有请求都是同源相对路径，<strong>换端口不需要重新打包</strong>。要让容器内也换端口，用 <code class="inl">-e PARAMS="--server.port=8080"</code>，同时把 <code class="inl">-p</code> 右侧改成 8080。</p>
+    <p><code class="inl">ports</code> 左边是宿主机端口、右边是容器端口。容器内固定监听 <code class="inl">10610</code>，一般只改 <code class="inl">HOST_PORT</code>；前端请求都是同源相对路径，<strong>换端口不需要重新打包</strong>。要让容器内也换端口，得同时改 <code class="inl">PARAMS</code>、compose 的端口映射和 Dockerfile 健康检查里的端口，不推荐。</p>
   </div>
 </section>
 
@@ -402,23 +492,28 @@
 <section id="s7">
   <h2 class="sec"><span class="num">7</span>验证与日常运维</h2>
 
-<pre><span class="cm"># 1) 服务探针（返回 JSON 即后端就绪）</span>
-<span class="cmd">curl</span> http://127.0.0.1:10610/api/system/health
+<pre><span class="cm"># 容器状态与端口映射，以及健康检查结果</span>
+<span class="cmd">cd</span> docker &amp;&amp; <span class="cmd">docker</span> compose ps
 
-<span class="cm"># 2) 首页（应返回前端 index.html）</span>
-<span class="cmd">curl</span> -I http://127.0.0.1:10610/
+<span class="cm"># 服务探针（重点看 database 字段）</span>
+<span class="cmd">curl</span> http://zzzoooo2.top:10610/api/system/health
 
-<span class="cm"># 3) 启动日志（含入口脚本打印的连接目标）</span>
-<span class="cmd">docker</span> logs -f bizlens-ai
+<span class="cm"># 首页（应返回前端 index.html）</span>
+<span class="cmd">curl</span> -I http://zzzoooo2.top:10610/
 
-<span class="cm"># 4) 容器状态与端口映射</span>
-<span class="cmd">docker</span> ps | <span class="cmd">grep</span> bizlens-ai</pre>
+<span class="cm"># 启动日志（含入口脚本打印的连接目标）</span>
+<span class="cmd">cd</span> docker &amp;&amp; <span class="cmd">docker</span> compose logs -f</pre>
 
-  <p>浏览器打开 <code class="inl">http://&lt;运行机IP&gt;:10610/</code> 即见登录页，前端页面与后端接口在同一端口下，无需额外前置代理。</p>
+  <p>浏览器打开 <code class="inl">http://zzzoooo2.top:10610/</code> 即见登录页，前端页面与后端接口在同一端口下，无需额外前置代理。若域名无法从服务器自身回环访问，上面两条 <code class="inl">curl</code> 的地址换成 <code class="inl">127.0.0.1</code> 即可。</p>
+
+  <div class="note warn">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
+    <p>探针的 <code class="inl">status</code> 有两个值：<code class="inl">UP</code> 正常，<code class="inl">DEGRADED</code> 表示它刚执行的 <code class="inl">SELECT 1</code> 没查到数据库（此时 <code class="inl">database: DOWN</code>）。两者 HTTP 都是 200，所以 <strong>容器显示 healthy 只说明 Web 服务在响应，不代表数据库通</strong>——排障时务必看返回体的 <code class="inl">database</code> 字段。</p>
+  </div>
 
   <div class="note ok">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-    <p>启动日志会打印生效的 <code class="inl">DATABASE_URL</code>、<code class="inl">DATABASE_USER</code>、<code class="inl">REDIS</code>（不含口令），便于确认容器连的是不是目标环境。出现「缺少必需的环境变量」说明 <code class="inl">docker/.env</code> 有遗漏；出现「未设置 AES_KEY / JWT_SECRET」只是提醒，容器仍会启动。</p>
+    <p>启动日志会打印生效的 <code class="inl">DATABASE_URL</code>、<code class="inl">DATABASE_USER</code>、<code class="inl">REDIS</code>（不含口令），便于确认连的是不是目标环境。出现「缺少必需的环境变量」说明 <code class="inl">docker/.env</code> 有遗漏；「未设置 AES_KEY / JWT_SECRET」只是提醒，容器仍会启动。</p>
   </div>
 </section>
 
@@ -427,25 +522,37 @@
   <h2 class="sec"><span class="num">8</span>版本升级与回滚</h2>
   <p>应用无状态（会话缓存在 Redis，索引临时目录随容器销毁），升级就是换镜像重启容器。</p>
 
-<pre><span class="cm"># 1) 本地重新打包</span>
-<span class="cmd">bash</span> docker/package.sh
+<pre><span class="cm"># 路径 A：Windows 有 Docker，一条命令出新版本（标签自动生成）</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt;
 
-<span class="cm"># 2) 传到构建机覆盖旧 jar</span>
-<span class="cmd">scp</span> svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar &lt;用户&gt;@&lt;构建机&gt;:/data/bizlens/svc/target/
+<span class="cm"># 路径 B：Windows 只打包，服务器构建推送</span>
+<span class="cmd">bash</span> docker/package.sh                       <span class="cm"># Windows</span>
+<span class="cmd">scp</span> -O -v -P 19992 "svc/target/bizlens-ai-service-0.0.1-SNAPSHOT.jar" zzzoooo2@zzzoooo2.top:/vol1/1000/app/
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package   <span class="cm"># 服务器</span>
 
-<span class="cm"># 3) 构建新版本并推送（换新标签）</span>
-<span class="cmd">cd</span> /data/bizlens &amp;&amp; <span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">TAG</span>=1.0.1 <span class="cmd">./docker/build.sh</span>
+<span class="cm"># 服务器：compose 拉新镜像并起容器（latest 已被上次发布更新）</span>
+<span class="cmd">./docker/run.sh</span>
 
-<span class="cm"># 4) 目标机器拉取新版本并重启</span>
-<span class="cmd">TAG</span>=1.0.1 <span class="cmd">./docker/run.sh</span></pre>
+<span class="cm"># 想按语义版本发布（且不改变 latest 指向）时显式给标签</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; 1.0.1</pre>
 
   <h3 class="sub">回滚</h3>
-  <p>把 <code class="inl">TAG</code> 换回上一个版本号重新执行 <code class="inl">run.sh</code>。旧镜像仍在私有仓库与本地，回滚不需要重新构建。</p>
+  <p>两种方式效果相同：临时回滚用命令行传 <code class="inl">TAG</code>，长期固定就改 <code class="inl">.env</code> 里的 <code class="inl">TAG</code>。两者都会重新拉取该版本并起容器。</p>
+<pre><span class="cm"># 看有哪些历史版本可用</span>
+<span class="cmd">docker</span> images | <span class="cmd">grep</span> bizlens-ai
+
+<span class="cm"># 方式一：临时回滚，不改配置文件</span>
+<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>
+
+<span class="cm"># 方式二：长期固定在某个版本</span>
+<span class="cmd">vi</span> docker/.env          <span class="cm"># 把 TAG=latest 改成 TAG=20261008-1712</span>
+<span class="cmd">./docker/run.sh</span></pre>
+  <p>旧镜像仍在私有仓库与本地，回滚不需要重新构建。若要长期保留某个版本，用显式标签（<code class="inl">1.0.0</code>）发布更稳妥。</p>
 
   <h3 class="sub">数据库变更</h3>
   <div class="note warn">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-    <p>容器不会自动执行 SQL 迁移。若本次版本涉及表结构变更，需先按 <code class="inl">svc/src/main/resources/db/</code> 下的脚本在目标库手工执行，再启动新容器。新建库用 <code class="inl">schema-postgresql.sql</code>；已有库按序号执行 <code class="inl">migration-*.sql</code>（可重复执行）。</p>
+    <p>容器不会自动执行 SQL 迁移。若版本涉及表结构变更，需先按 <code class="inl">svc/src/main/resources/db/</code> 下的脚本在目标库手工执行，再启动新容器。新建库用 <code class="inl">schema-postgresql.sql</code>；已有库按序号执行 <code class="inl">migration-*.sql</code>（可重复执行）。</p>
   </div>
 </section>
 
@@ -454,96 +561,188 @@
   <h2 class="sec"><span class="num">9</span>常见问题</h2>
 
   <table>
+    <caption>打不开或选不了路径</caption>
     <tr><th>现象</th><th>原因与处理</th></tr>
     <tr>
-      <td>docker login 报 <code>unauthorized: incorrect username or password</code></td>
-      <td>用了账号密码登录。Docker Hub 的 CLI 登录必须用 <strong>Access Token</strong>：网页端 Account Settings → Personal access tokens 生成（权限 Read &amp; Write），登录时粘贴到 Password 位置。</td>
+      <td>Windows 上没装 Docker Desktop，能不能构建？</td>
+      <td>可以，但不在 Windows 上构建。走<strong>路径 B</strong>：Windows 只 <code>package.sh</code> 打包，把 jar 传到服务器，在服务器上 <code>./docker/release.sh &lt;账号&gt; &lt;标签&gt; --skip-package</code>。服务器上构建不需要 Node/JDK/Maven。</td>
     </tr>
     <tr>
-      <td>push 报 <code>denied: requested access to the resource is denied</code></td>
-      <td>命名空间不对或未登录。<code>REGISTRY</code> 必须是你的 Docker Hub 账号名（要与登录账号一致），不能是 <code>library</code> 或别人的账号。</td>
+      <td><code>error during connect: ... dockerDesktopLinuxEngine</code></td>
+      <td>这台机器上的 Docker 没跑起来。装的是 Docker Desktop 就先启动它；本机压根没装就改用路径 B。</td>
     </tr>
     <tr>
-      <td>push 报 <code>repository does not exist or may require 'docker login'</code></td>
-      <td>仓库不存在。先在 Docker Hub 网页端创建名为 <code>bizlens-ai</code> 的私有仓库，再推送。</td>
+      <td>Docker Desktop 启动时提示 WSL2 相关错误</td>
+      <td>按提示安装 WSL2 内核并重启；或在设置里把后端切到 WSL2。企业机器若禁用了虚拟化，需要先在 BIOS 打开 VT-x/AMD-V。</td>
     </tr>
     <tr>
-      <td>目标机 pull 报 <code>unauthorized: authentication required</code></td>
-      <td>私有仓库需先在目标机执行 <code>docker login</code>（用 Token），再拉取。</td>
+      <td>PowerShell 里执行 <code>./docker/release.sh</code> 报错</td>
+      <td>脚本是 bash 脚本，请在 <strong>Git Bash</strong> 里执行（Git for Windows 自带）；也可 <code>bash ./docker/release.sh 账号 1.0.0</code>。</td>
     </tr>
     <tr>
-      <td>拉取基础镜像或推送镜像很慢、超时</td>
-      <td>Docker Hub 网络问题。可给 Docker daemon 配置 registry mirror（<code>/etc/docker/daemon.json</code>），或在能出网的机器上先 <code>docker pull</code> 再 <code>docker tag</code>/<code>save</code>、<code>load</code> 中转。</td>
+      <td>Linux 上 <code>./docker/run.sh</code> 提示 Permission denied</td>
+      <td>git 在 Windows 上不记录执行位。服务器上执行一次 <code>chmod +x docker/*.sh</code>，或统一用 <code>bash docker/run.sh</code>。</td>
+    </tr>
+  </table>
+
+  <table>
+    <caption>构建与打包</caption>
+    <tr><th>现象</th><th>原因与处理</th></tr>
+    <tr>
+      <td>版本号能省略吗？Docker 会不会自己生成标签？</td>
+      <td>能省略，但标签不是 Docker 生成的——Docker 不带 <code>-t</code> 只会产出无名镜像（只有 sha256 镜像 ID），无法按名字推送。省略版本号时由 <code>release.sh</code> 生成时间戳标签（如 <code>20261009-1435</code>）并同时更新 <code>latest</code>；想按提交号区分就加 <code>--git</code>。</td>
     </tr>
     <tr>
       <td>未找到 bizlens-ai-service-*.jar</td>
-      <td>本机没打包或没传上去。先本地执行 <code>docker/package.sh</code>，再把 jar 放到构建机的 <code>svc/target/</code> 下。</td>
+      <td>还没打包，或路径 B 忘了传 jar。执行 <code>bash docker/package.sh</code> 并确认服务器上 <code>svc/target/</code> 里有该文件。</td>
     </tr>
     <tr>
       <td>提示 jar 内未找到前端产物 / 生产配置</td>
-      <td>用到的是旧 jar，或打包时前端构建失败。重新执行 <code>docker/package.sh</code>，确认结尾打印出「完成：…jar」。</td>
+      <td>用的是旧 jar 或前端构建失败。重新执行 <code>bash docker/package.sh</code>，确认结尾打印「完成：…jar」。</td>
     </tr>
     <tr>
-      <td>docker build 报找不到 jar（no such file or directory）</td>
-      <td>构建上下文是 <code>svc/</code>，jar 必须位于 <code>svc/target/</code>。不要改动 <code>svc/.dockerignore</code> 的排除规则。</td>
+      <td>未指定镜像命名空间 REGISTRY</td>
+      <td>没传账号。用 <code>release.sh &lt;账号&gt; &lt;标签&gt;</code>，或 <code>REGISTRY=&lt;账号&gt;</code> 再跑 build.sh。</td>
+    </tr>
+    <tr>
+      <td>构建缓存/旧镜像占满 C 盘</td>
+      <td><code>docker system df</code> 看占用，<code>docker system prune -a</code> 清理无用镜像与缓存（会删掉未使用的镜像，慎用）。</td>
+    </tr>
+    <tr>
+      <td>提示 <code>digital envelope routines::unsupported</code></td>
+      <td>Node 版本过高导致的老 webpack 报错（本项目 Vite 构建一般不会遇到）。确认 Node 为 18 或 20。</td>
+    </tr>
+    <tr>
+      <td>换行符 CRLF 导致容器起不来（<code>/bin/sh^M</code>）</td>
+      <td>仓库已带 <code>.gitattributes</code>，clone 出来就是 LF，正常不会有这个问题。只有用记事本手工改过脚本才会出现：<code>sed -i 's/\r$//' svc/entrypoint.sh docker/*.sh</code>。Dockerfile 里另有一道 CR 清理兜底。</td>
+    </tr>
+  </table>
+
+  <table>
+    <caption>推送与登录</caption>
+    <tr><th>现象</th><th>原因与处理</th></tr>
+    <tr>
+      <td>本地没有镜像 &lt;账号&gt;/bizlens-ai:xxx</td>
+      <td>还没构建，或构建时用了别的账号/标签。先 <code>REGISTRY=&lt;账号&gt; TAG=&lt;标签&gt; ./docker/build.sh</code>，再推送。</td>
+    </tr>
+    <tr>
+      <td><code>unauthorized: incorrect username or password</code></td>
+      <td>用了账号密码登录。CLI 登录必须用 <strong>Access Token</strong>（网页端 Account Settings → Personal access tokens），粘贴到 Password 位置。</td>
+    </tr>
+    <tr>
+      <td><code>denied: requested access to the resource is denied</code></td>
+      <td>命名空间不对或未登录。<code>&lt;账号&gt;</code> 必须与你登录的 Docker Hub 账号一致。</td>
+    </tr>
+    <tr>
+      <td><code>repository does not exist or may require 'docker login'</code></td>
+      <td>仓库不存在。先在 Docker Hub 网页端创建名为 <code>bizlens-ai</code> 的私有仓库。</td>
+    </tr>
+    <tr>
+      <td>服务器 pull 报 <code>unauthorized: authentication required</code></td>
+      <td>私有仓库需先在服务器执行 <code>docker login</code>（用 Token）。</td>
+    </tr>
+    <tr>
+      <td>推送或拉取很慢、超时</td>
+      <td>Docker Hub 网络问题。可给 daemon 配 registry mirror（Windows 在 Docker Desktop 设置里改，Linux 改 <code>/etc/docker/daemon.json</code>），或在一台能出网的机器上 <code>docker pull</code> 后 <code>save</code>/<code>load</code> 中转。</td>
+    </tr>
+  </table>
+
+  <table>
+    <caption>服务器运行阶段（docker compose）</caption>
+    <tr><th>现象</th><th>原因与处理</th></tr>
+    <tr>
+      <td>找不到 <code>docker compose</code> 命令</td>
+      <td>本机没装 compose 插件。Docker Desktop 自带；Linux 上装 <code>docker-compose-plugin</code>。<code>run.sh</code> 会自动在 <code>docker compose</code> 与老版的 <code>docker-compose</code> 之间择一，两者都没有才会报错。</td>
+    </tr>
+    <tr>
+      <td>compose 报 <code>Unsupported config option for services</code></td>
+      <td>本机是 Compose v1（<code>docker-compose</code>），读不了本文件。升级到 compose v2 即可。</td>
+    </tr>
+    <tr>
+      <td>compose 报 <code>required variable REGISTRY is missing a value: 请在 docker/.env 中设置…</code></td>
+      <td><code>docker/.env</code> 不存在，或该项为空。补齐后重跑。注意此时连 <code>docker compose down</code> 也会因同一原因报错，急着停容器可直接 <code>docker rm -f bizlens-ai</code>。</td>
+    </tr>
+    <tr>
+      <td><code>docker compose ps</code> 显示 healthy，但页面接口报错</td>
+      <td>健康检查只看 Web 服务有没有响应。数据库不通时探针仍返回 HTTP 200（<code>status: DEGRADED</code>），要 <code>curl</code> 探针看 <code>database</code> 字段。</td>
     </tr>
     <tr>
       <td>容器反复重启，日志报缺少必需的环境变量</td>
       <td><code>docker/.env</code> 少了数据库或 Redis 项，补齐后重跑 <code>run.sh</code>。</td>
     </tr>
     <tr>
-      <td>容器启动即退出，报 <code>exec format error</code> 或 <code>/bin/sh^M</code></td>
-      <td>entrypoint.sh 是 CRLF 换行。执行 <code>sed -i 's/\r$//' svc/entrypoint.sh docker/*.sh</code> 后重新构建。</td>
-    </tr>
-    <tr>
       <td>日志报 <code>Could not resolve placeholder</code></td>
       <td>启动命令漏传环境变量。<code>DATABASE_URL</code>、<code>DATABASE_USERNAME</code>、<code>DATABASE_PASSWORD</code>、<code>REDIS_HOST</code>、<code>REDIS_PORT</code> 五项必填。</td>
     </tr>
     <tr>
-      <td>能打开页面但接口报错、连不上数据库</td>
-      <td>容器内的 <code>127.0.0.1</code> 是容器自身，不是宿主机。数据库/Redis 地址要填宿主机可达的 IP，不能写 localhost。</td>
+      <td>页面能打开但接口报错，探针返回 <code>database: DOWN</code></td>
+      <td>容器里的 <code>127.0.0.1</code> 是容器自身，不是宿主机。本环境的数据库也在 <code>zzzoooo2.top</code> 上，<code>DATABASE_URL</code> 里写 <code>localhost</code>／<code>127.0.0.1</code> 连不上——用域名（<code>zzzoooo2.top:53309</code>）或宿主机内网 IP。若域名解析到公网 IP 而服务器不支持回环访问，改用内网 IP，或在 compose 的 <code>bizlens-ai</code> 下加 <code>extra_hosts: ["host.docker.internal:host-gateway"]</code> 后把地址写成 <code>host.docker.internal</code>。</td>
     </tr>
     <tr>
-      <td>索引代码仓库时报 502 或连不上</td>
+      <td>索引代码仓库报 502 或连不上</td>
       <td>设了 <code>BIZLENS_GIT_PROXY</code> 却没把内网 Git 地址写进 <code>BIZLENS_GIT_NO_PROXY</code>，内网流量被送去代理了。</td>
     </tr>
     <tr>
       <td>端口被占用（Port already in use）</td>
-      <td>用 <code>HOST_PORT=8080 ./docker/run.sh</code> 换宿主机端口，或先停掉占用该端口的进程/容器。</td>
+      <td><code>HOST_PORT=8080 ./docker/run.sh</code> 换宿主机端口，或先停掉占用进程/旧容器。</td>
+    </tr>
+    <tr>
+      <td>前端页面打开是空白/资源 404</td>
+      <td>镜像里的 jar 没带前端产物，多半是构建时用了旧 jar。重新构建，并注意脚本开头的「已确认 jar 内含前端产物」提示。</td>
     </tr>
   </table>
 </section>
 
 <!-- ============ 10 ============ -->
 <section id="s10">
-  <h2 class="sec"><span class="num">10</span>命令速查</h2>
+  <h2 class="sec"><span class="num">10</span>脚本职责与命令速查</h2>
+
+  <table>
+    <caption>docker/ 下的文件</caption>
+    <tr><th>文件</th><th>在哪跑</th><th>做什么</th></tr>
+    <tr><td class="mono">package.sh</td><td>Windows（需 Node/JDK/Maven）</td><td>前端构建并并入 jar，Maven 打包出可部署 jar</td></tr>
+    <tr><td class="mono">build.sh</td><td>装了 Docker 的机器</td><td>校验 jar 与 daemon，构建镜像（<strong>不推送</strong>）</td></tr>
+    <tr><td class="mono">push.sh</td><td>装了 Docker 的机器</td><td>校验后推送镜像，可选同时更新 latest</td></tr>
+    <tr><td class="mono">release.sh</td><td>装了 Docker 的机器</td><td>一条命令串起 打包 → 构建 → 推送</td></tr>
+    <tr><td class="mono">docker-compose.yml</td><td>服务器</td><td>服务定义：镜像、端口、环境变量、重启策略、日志轮转</td></tr>
+    <tr><td class="mono">run.sh</td><td>服务器</td><td>compose 的包装：校验 .env → pull → up -d → 等就绪</td></tr>
+    <tr><td class="mono">.env.example</td><td>—</td><td>环境变量模板，复制成 <code>.env</code> 供 compose 与脚本共用（已被 .gitignore 忽略）</td></tr>
+  </table>
 
 <pre><span class="cm"># ---- 一次性准备 ----</span>
 <span class="cm"># Docker Hub 网页端：Create repository → bizlens-ai → Private</span>
 <span class="cm"># Account Settings → Personal access tokens → 生成 Read &amp; Write 令牌</span>
-<span class="cmd">docker</span> login -u &lt;账号&gt;          <span class="cm"># Password 填 Access Token</span>
+<span class="cmd">docker</span> login -u &lt;账号&gt;              <span class="cm"># Password 填 Access Token</span>
 
-<span class="cm"># ---- 本地打包 ----</span>
+<span class="cm"># ---- Windows：打包 ----</span>
 <span class="cmd">bash</span> docker/package.sh
 
-<span class="cm"># ---- 构建并推送 ----</span>
-<span class="cmd">chmod</span> +x docker/*.sh
-<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span>                 <span class="cm"># 构建 + 推送</span>
-<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span> --no-push       <span class="cm"># 只构建</span>
-<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">TAG</span>=1.0.0 <span class="cmd">./docker/build.sh</span>
+<span class="cm"># ---- 有 Docker 的机器：构建 + 推送 ----</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt;                        <span class="cm"># 打包+构建+推送，标签自动生成</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --git                  <span class="cm"># 标签用 git 提交短哈希</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; 1.0.0                   <span class="cm"># 指定标签（不动 latest）</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --skip-package          <span class="cm"># 用现有 jar（路径 B）</span>
+<span class="cmd">./docker/release.sh</span> &lt;账号&gt; --no-push               <span class="cm"># 只打包+构建</span>
+<span class="cmd">REGISTRY</span>=&lt;账号&gt; <span class="cmd">./docker/build.sh</span>                   <span class="cm"># 只构建</span>
+<span class="cmd">./docker/push.sh</span> &lt;账号&gt; 20261009-1435              <span class="cm"># 只推送某个标签</span>
+<span class="cmd">./docker/push.sh</span> &lt;账号&gt; 1.0.0 --latest             <span class="cm"># 推送并更新 latest</span>
 
-<span class="cm"># ---- 目标机器运行 ----</span>
-<span class="cmd">docker</span> login -u &lt;账号&gt;          <span class="cm"># 私有仓库必须先登录</span>
+<span class="cm"># ---- 服务器：compose 拉取 + 启动 ----</span>
+<span class="cmd">docker</span> login -u &lt;账号&gt;
 <span class="cmd">cp</span> docker/.env.example docker/.env &amp;&amp; <span class="cmd">vi</span> docker/.env
-<span class="cmd">./docker/run.sh</span>
+<span class="cmd">./docker/run.sh</span>                                  <span class="cm"># 拉 latest 启动（内部就是 compose）</span>
+<span class="cmd">TAG</span>=20261008-1712 <span class="cmd">./docker/run.sh</span>                <span class="cm"># 指定版本（回滚）</span>
 <span class="cmd">HOST_PORT</span>=8080 <span class="cmd">./docker/run.sh</span>
-<span class="cmd">docker</span> logs -f bizlens-ai
-<span class="cmd">docker</span> restart bizlens-ai
-<span class="cmd">curl</span> http://127.0.0.1:10610/api/system/health</pre>
+<span class="cmd">cd</span> docker
+<span class="cmd">docker</span> compose ps
+<span class="cmd">docker</span> compose logs -f
+<span class="cmd">docker</span> compose restart
+<span class="cmd">docker</span> compose down
+<span class="cmd">curl</span> http://zzzoooo2.top:10610/api/system/health</pre>
 </section>
 
 <footer>
-  BizLens AI 容器部署说明 · 单体容器（前后端同源，容器端口 10610）· 推送 Docker Hub 私有仓库 · 2026-10-09
+  BizLens AI 部署说明 · 打包在 Windows、构建在装了 Docker 的机器、服务器只拉取运行 · 单体容器（前后端同源，容器端口 10610）· 2026-10-09
 </footer>
 
 </div>
@@ -556,7 +755,7 @@ document.querySelectorAll('pre').forEach(function (pre) {
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     + '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>复制';
   btn.addEventListener('click', function () {
-    var text = pre.innerText.replace(/ /g, ' ');
+    var text = pre.innerText.replace(/ /g, ' ');
     var done = function () {
       btn.classList.add('ok');
       btn.lastChild.nodeValue = '已复制';

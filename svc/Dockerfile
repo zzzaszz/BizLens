@@ -10,23 +10,23 @@ MAINTAINER inks
 
 USER root
 
-# 代码/知识库索引依赖 git 命令行（浅克隆仓库），基础镜像自带则跳过安装
+# 代码/知识库索引依赖 git 命令行（浅克隆仓库），健康检查依赖 curl，基础镜像自带则跳过安装
 RUN set -e; \
-    if command -v git >/dev/null 2>&1; then \
-        echo "git 已存在：$(git --version)"; \
+    if command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then \
+        echo "git 与 curl 已存在"; \
     elif command -v apt-get >/dev/null 2>&1; then \
         apt-get update \
-        && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
+        && apt-get install -y --no-install-recommends git curl openssh-client ca-certificates \
         && rm -rf /var/lib/apt/lists/*; \
     elif command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache git openssh-client ca-certificates; \
+        apk add --no-cache git curl openssh-client ca-certificates; \
     elif command -v yum >/dev/null 2>&1; then \
-        yum install -y git openssh-clients ca-certificates; \
+        yum install -y git curl openssh-clients ca-certificates; \
     else \
-        echo "错误：基础镜像内无 git 且无可用包管理器，索引功能将不可用，请更换 BASE_IMAGE" >&2; \
+        echo "错误：基础镜像内既无 git/curl，也没有可用包管理器，请更换 BASE_IMAGE" >&2; \
         exit 1; \
     fi; \
-    git --version
+    git --version && curl --version
 
 # 挂载目录
 VOLUME /home/inks
@@ -44,6 +44,13 @@ COPY ./target/bizlens-ai-service-*.jar /home/inks/app.jar
 
 # 前后端同源，只暴露一个端口
 EXPOSE 10610
+
+# 健康检查：调探针接口，docker compose ps 会显示 healthy/unhealthy
+# 注意探针在数据库不可用时返回 status=DEGRADED 但 HTTP 仍为 200，
+# 所以这里的 healthy 只代表 Web 服务在响应，数据库状态请看返回体。
+# 端口写死 10610：若用 PARAMS 改了容器端口，需同步改这一行
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:10610/api/system/health || exit 1
 
 # 启动脚本（先去掉可能存在的 CR：CRLF 会让 shebang 与 set 命令失效）
 COPY ./entrypoint.sh /usr/local/bin/

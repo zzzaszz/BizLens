@@ -1,56 +1,42 @@
 #!/usr/bin/env bash
-# 构建镜像并推送到镜像仓库（默认推送到 Docker Hub 私有仓库，前后端同源，单个镜像单个端口）
+# 构建镜像（只构建，不推送）。推送用 docker/push.sh；一步到位用 docker/release.sh。
+# 只需要 Docker，不需要 JDK/Maven —— 镜像内不编译，只复制已打好的 jar。
+# 没有 Docker Desktop 的 Windows 机器：把 jar 传到装了 Docker 的服务器，在服务器上执行本脚本。
+#
 # 用法：
-#   docker login -u <DockerHub账号>        # 首次，密码填 Access Token
 #   REGISTRY=<DockerHub账号> ./docker/build.sh
-#   REGISTRY=<DockerHub账号> TAG=1.0.0 ./docker/build.sh
-#   REGISTRY=<DockerHub账号> ./docker/build.sh --no-push    # 只构建，不推送
+#   REGISTRY=<账号> TAG=1.0.0 ./docker/build.sh
+#   REGISTRY=<账号> BASE_IMAGE=eclipse-temurin:8-jre ./docker/build.sh
 # 可覆盖的参数：REGISTRY / IMAGE / TAG / BASE_IMAGE
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# REGISTRY 是命名空间或自建仓库前缀：Docker Hub 填账号名（如 mycrop），自建仓库填完整前缀（如 harbor.corp.local/bizlens）
+# REGISTRY 是命名空间或自建仓库前缀：Docker Hub 填账号名（如 myid），自建仓库填完整前缀（如 harbor.corp.local/bizlens）
 REGISTRY="${REGISTRY:-}"
 IMAGE="${IMAGE:-bizlens-ai}"
 TAG="${TAG:-latest}"
-# 公开可用的 JDK8 运行环境（Ubuntu 版，含 apt，镜像内会按需补装 git）
+# 公共可用的 JDK8 运行环境（Ubuntu 版，含 apt，镜像内会按需补装 git）
 BASE_IMAGE="${BASE_IMAGE:-eclipse-temurin:8-jre}"
 
-if [ -n "$REGISTRY" ]; then
-    FULL_IMAGE="$REGISTRY/$IMAGE:$TAG"
-else
-    FULL_IMAGE="$IMAGE:$TAG"
+# 1. 构建时就把名字定成最终要推的名字，避免构建与推送两处名字对不上
+if [ -z "$REGISTRY" ]; then
+    echo "错误：未指定镜像命名空间 REGISTRY（Docker Hub 账号名）。" >&2
+    echo "例如： REGISTRY=mydockerid ./docker/build.sh" >&2
+    exit 1
 fi
+FULL_IMAGE="$REGISTRY/$IMAGE:$TAG"
 
-PUSH=1
-if [ "${1:-}" = "--no-push" ]; then
-    PUSH=0
-fi
-
-# 推送前校验命名空间：Docker Hub 不接受没有命名空间（账号/组织）的镜像名
-if [ "$PUSH" = "1" ]; then
-    case "$FULL_IMAGE" in
-        */*) : ;;
-        *)
-            echo "错误：镜像名 $FULL_IMAGE 没有命名空间，无法推送。" >&2
-            echo "请用你的 Docker Hub 账号名重跑，例如： REGISTRY=mydockerid ./docker/build.sh" >&2
-            echo "（也可写进 docker/.env：REGISTRY=mydockerid）" >&2
-            exit 1
-            ;;
-    esac
-fi
-
-# 1. 校验 jar 存在
+# 2. 校验 jar 存在
 JAR="$(ls "$ROOT"/svc/target/bizlens-ai-service-*.jar 2>/dev/null | grep -v '\.original$' | head -1 || true)"
 if [ -z "$JAR" ]; then
     echo "错误：未找到 svc/target/bizlens-ai-service-*.jar" >&2
-    echo "请先在本地执行 bash docker/package.sh 打包，再上传本仓库到本机。" >&2
+    echo "请先执行 bash docker/package.sh 打包（或用 docker/release.sh 一步完成）。" >&2
     exit 1
 fi
 echo "==> 使用 jar：$JAR"
 
-# 2. 校验 jar 内含前端产物与 prod 配置，避免只部署了后端接口或配置缺失
+# 3. 校验 jar 内含前端产物与 prod 配置，避免只部署了后端接口或配置缺失
 if command -v unzip >/dev/null 2>&1; then
     LIST="$(unzip -l "$JAR" | grep 'BOOT-INF/classes/' || true)"
     if ! echo "$LIST" | grep -q "BOOT-INF/classes/static/index.html"; then
@@ -68,26 +54,23 @@ else
     echo "提示：本机无 unzip，跳过 jar 内含内容的校验"
 fi
 
-# 3. 构建镜像（上下文为 svc/，只复制 jar，不在镜像内编译）
+# 4. 确认 Docker daemon 可用
+if ! docker info >/dev/null 2>&1; then
+    echo "错误：连不上 Docker daemon。" >&2
+    echo "Windows 上请先启动 Docker Desktop；若本机没装 Docker，把 jar 传到服务器后再执行本脚本。" >&2
+    exit 1
+fi
+
+# 5. 构建镜像
+# 切到 svc/ 后用相对路径传参，避免 Git Bash 把 /d/... 形式的路径转换成 Windows 路径
+cd "$ROOT/svc"
 echo "==> docker build -t $FULL_IMAGE"
 docker build \
-    -f "$ROOT/svc/Dockerfile" \
+    -f Dockerfile \
     --build-arg "BASE_IMAGE=$BASE_IMAGE" \
     -t "$FULL_IMAGE" \
-    "$ROOT/svc"
+    .
 
-# 4. 推送
-if [ "$PUSH" = "1" ]; then
-    echo "==> docker push $FULL_IMAGE"
-    if ! docker push "$FULL_IMAGE"; then
-        echo "推送失败。若提示 unauthorized/denied，请先登录（密码用 Access Token，不是账号密码）：" >&2
-        echo "  docker login -u <DockerHub账号>" >&2
-        echo "若提示 repository does not exist，请先在 Docker Hub 网页端创建该私有仓库。" >&2
-        exit 1
-    fi
-    echo "完成：$FULL_IMAGE"
-else
-    echo "完成（未推送）：$FULL_IMAGE"
-fi
 echo
-echo "接着在目标机器上 docker login 后执行 ./docker/run.sh 启动容器。"
+echo "构建完成：$FULL_IMAGE"
+echo "下一步推送： ./docker/push.sh $REGISTRY $TAG"
