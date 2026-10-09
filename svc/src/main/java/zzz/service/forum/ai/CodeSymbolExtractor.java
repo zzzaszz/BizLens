@@ -8,6 +8,8 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -31,6 +33,8 @@ import java.util.regex.Pattern;
  */
 public class CodeSymbolExtractor {
 
+    private static final Logger log = LoggerFactory.getLogger(CodeSymbolExtractor.class);
+
     private static final JavaParser JAVA_PARSER = new JavaParser(new ParserConfiguration()
             .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_8));
 
@@ -43,8 +47,18 @@ public class CodeSymbolExtractor {
      * 它们长度最短，在召回排序（按片段长度升序）里排在最前面，把检索名额全占掉——
      * 实测表现为"问某接口的权限，模型说片段里找不到这个接口"。
      */
+    /*
+     * 返回类型字符类里必须允许空格：泛型参数之间常有 ", "，如 Map<String, Object>。
+     * 不含空格时 `R<Map<String, Object>> getOnlineDayLoad(...)` 这类签名**永远匹配不到**，
+     * 该方法在索引里就整体消失——表现为"问某接口的请求方式与参数，模型说库里找不到"。
+     *
+     * 但类型的**首字符**不能是空白：`^[ \t]*` 会回溯让出缩进，缩进一旦被当成类型，
+     * 行首的 `if (state == null) {` 就会被识别成名为 `if` 的方法。
+     * 因此写成"首字符非空白 + 其余可含空格"两段；空格用 [ \t] 而不是 \s，避免匹配跨行。
+     */
     private static final Pattern JAVA_METHOD = Pattern.compile(
-            "(?m)^[ \\t]*(?:(?:public|protected|private|static|final|synchronized|native|abstract|default)\\s+)*[\\w<>?,.\\[\\]]+\\s+(\\w+)\\s*\\([^;{}]*\\)\\s*(?:throws\\s+[^\\{]+)?\\{");
+            "(?m)^[ \\t]*(?:(?:public|protected|private|static|final|synchronized|native|abstract|default)\\s+)*"
+                    + "[\\w<>?,.\\[\\]][\\w<>?,.\\[\\] \\t]*\\s+(\\w+)\\s*\\([^;{}]*\\)\\s*(?:throws\\s+[^\\{]+)?\\{");
     private static final Pattern XML_OPERATION = Pattern.compile(
             "(?m)^[ \\t]*<(select|insert|update|delete)\\s+[^>]*\\bid\\s*=\\s*(['\"])([^'\"]+)\\2");
     private static final Pattern JS_FUNCTION = Pattern.compile(
@@ -87,10 +101,24 @@ public class CodeSymbolExtractor {
     }
 
     private boolean collectJavaAst(final List<Symbol> target, final String source, final String[] lines) {
+        ParseResult<CompilationUnit> parsed;
         try {
-            ParseResult<CompilationUnit> result = JAVA_PARSER.parse(source);
-            if (!result.isSuccessful() || !result.getResult().isPresent()) return false;
-            CompilationUnit unit = result.getResult().get();
+            parsed = JAVA_PARSER.parse(source);
+        } catch (Throwable t) {
+            log.warn("java 源码解析异常，回退正则提取: {}", t.toString());
+            return false;
+        }
+        if (!parsed.getResult().isPresent()) {
+            log.warn("java 源码解析无可用 AST，回退正则提取: problems={}", firstProblem(parsed));
+            return false;
+        }
+        if (!parsed.isSuccessful()) {
+            // 客户仓库里存在未提交的中间状态是常态。有语法错误时 JavaParser 仍会给出部分 AST，
+            // 保留它比整体退回正则更完整：正则既拿不到 CLASS 切片，也容易漏掉带泛型的签名。
+            log.warn("java 源码有语法错误，按部分 AST 提取: problems={}", firstProblem(parsed));
+        }
+        try {
+            CompilationUnit unit = parsed.getResult().get();
             for (ClassOrInterfaceDeclaration type : unit.findAll(ClassOrInterfaceDeclaration.class)) {
                 int startLine = type.getBegin().isPresent() ? type.getBegin().get().line : 1;
                 int endLine = type.getEnd().isPresent() ? type.getEnd().get().line : startLine;
@@ -112,9 +140,17 @@ public class CodeSymbolExtractor {
                         buildMethodSummary(constructor.getNameAsString(), lines, startLine, signatureLine, "构造方法")));
             }
             return !target.isEmpty();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            log.warn("java 符号提取异常，回退正则提取: {}", t.toString());
             return false;
         }
+    }
+
+    /** 取第一个解析问题，仅用于日志——这里曾经是 `catch (Throwable ignored)`，退化过程完全不可见。 */
+    private String firstProblem(ParseResult<?> parsed) {
+        if (parsed == null) return "(null)";
+        for (Object problem : parsed.getProblems()) return String.valueOf(problem);
+        return "(无)";
     }
 
     private List<String> annotations(List<AnnotationExpr> annotations) {

@@ -83,6 +83,42 @@ public class CodeSymbolExtractorTest {
         assertEquals(7, method.getStartLine());
     }
 
+    @Test
+    public void regexFallbackHandlesGenericReturnTypesWithSpaces() {
+        // 走与 Java 兜底同一段 JAVA_METHOD 正则（kt 分支直接命中该正则）。
+        // 返回类型里含 ", " 的泛型曾经完全匹配不到，这类方法在索引里会整体消失——
+        // 实测 D05MBIR3APSController.getOnlineDayLoad 因此查不到请求方式与参数。
+        List<CodeSymbolExtractor.Symbol> symbols = extractor.extract("kt",
+                "class Demo {\n"
+                        + "  public R<Map<String, Object>> getOnlineDayLoad(@RequestBody JSONObject body) {\n"
+                        + "    return ok();\n"
+                        + "  }\n"
+                        + "}\n");
+
+        CodeSymbolExtractor.Symbol method = find(symbols, "METHOD", "getOnlineDayLoad");
+        assertNotNull(method);
+        assertEquals(2, method.getStartLine());
+        assertEquals(4, method.getEndLine());
+    }
+
+    @Test
+    public void regexFallbackIgnoresControlStatementsAsMethods() {
+        // 放宽返回类型字符类后，`^[ \t]*` 会回溯让出缩进、缩进被当成类型，
+        // 行首的 `if (...) {` 曾因此被识别成名为 `if` 的方法（实测一个 Controller 多出 7 个）。
+        List<CodeSymbolExtractor.Symbol> symbols = extractor.extract("kt",
+                "class Demo {\n"
+                        + "  public R<String> run() {\n"
+                        + "    if (ready == null) {\n"
+                        + "      return null;\n"
+                        + "    }\n"
+                        + "    return ok();\n"
+                        + "  }\n"
+                        + "}\n");
+
+        assertNotNull(find(symbols, "METHOD", "run"));
+        assertTrue(symbols.stream().noneMatch(s -> "METHOD".equals(s.getType()) && "if".equals(s.getName())));
+    }
+
     private CodeSymbolExtractor.Symbol find(List<CodeSymbolExtractor.Symbol> symbols, String type, String name) {
         for (CodeSymbolExtractor.Symbol symbol : symbols) {
             if (type.equals(symbol.getType()) && name.equals(symbol.getName())) return symbol;

@@ -438,6 +438,11 @@ public class AiCodeRetrievalService {
 
     /**
      * 把召回结果拼成注入模型的上下文文本。
+     * <p>
+     * 同一文件的方法/符号切片与 FILE 切片同时命中时，FILE 切片让位：FILE 切片保存完整正文，
+     * 经 {@link #MAX_SNIPPET_IN_PROMPT} 截断后往往只剩 package 与 import 区，
+     * 会把真正能回答问题的方法体挤出上下文（实测 D05MBIR3APSController.getOnlineDayLoad：
+     * 该文件 7576 字符，1500 字符截断恰好切在类注解处，方法体完全不可见）。
      *
      * @return 拼好的文本；无命中时返回 null（调用方据此决定是否加这段 system 消息）
      */
@@ -445,6 +450,8 @@ public class AiCodeRetrievalService {
         if (hits == null || hits.isEmpty()) {
             return null;
         }
+        // 先登记「已有方法/符号切片」的文件，供下面压制同文件的 FILE 切片
+        Set<Long> symbolHitDocuments = collectSymbolHitDocuments(hits);
         StringBuilder context = new StringBuilder(1024);
         Set<Long> completeDocuments = new HashSet<>();
         StringBuilder completeFileIndex = new StringBuilder();
@@ -462,12 +469,17 @@ public class AiCodeRetrievalService {
                         .append(hit.getChunkType()).append(' ').append(hit.getSymbolName())
                         .append("（第 ").append(hit.getStartLine()).append('-').append(hit.getEndLine()).append(" 行）\n");
             }
+            if (!hit.isCompleteFile() && "FILE".equalsIgnoreCase(hit.getChunkType())
+                    && hit.getDocumentId() != null && symbolHitDocuments.contains(hit.getDocumentId())) {
+                // 同文件的方法切片已在上下文中，FILE 切片可注入的内容只剩 import 区，跳过以免占用预算与名额
+                continue;
+            }
             String snippet = hit.getSourceSnippet();
             if (snippet == null || snippet.trim().isEmpty()) {
                 continue;
             }
             if (snippet.length() > MAX_SNIPPET_IN_PROMPT) {
-                snippet = snippet.substring(0, MAX_SNIPPET_IN_PROMPT) + "\n...(已截断)";
+                snippet = truncateSnippet(snippet);
             }
             if (context.length() + snippet.length() > MAX_TOTAL_CHARS) {
                 if (!sourceBudgetNoticeAdded) {
@@ -497,5 +509,69 @@ public class AiCodeRetrievalService {
             context.append("\n完整文件中的全部已识别接口/方法/操作：\n").append(completeFileIndex);
         }
         return context.length() == 0 ? null : context.toString();
+    }
+
+    /**
+     * 收集「已召回方法/符号切片且带源码」的文件。
+     * <p>
+     * 与遍历顺序无关，因此 FILE 切片排在方法切片之前时也能正确压制。
+     */
+    private Set<Long> collectSymbolHitDocuments(List<AiCodeChunkHit> hits) {
+        Set<Long> documents = new HashSet<>();
+        for (AiCodeChunkHit hit : hits) {
+            if (hit != null && !hit.isCompleteFile() && hit.getDocumentId() != null && isSymbolHit(hit)) {
+                documents.add(hit.getDocumentId());
+            }
+        }
+        return documents;
+    }
+
+    /** 符号切片（CLASS/METHOD/MAPPER 等，非 FILE）且带源码片段 */
+    private boolean isSymbolHit(AiCodeChunkHit hit) {
+        return !"FILE".equalsIgnoreCase(hit.getChunkType())
+                && hit.getSourceSnippet() != null && !hit.getSourceSnippet().trim().isEmpty();
+    }
+
+    /**
+     * 截断超限的源码片段。
+     * <p>
+     * 先丢掉开头的 package/import 区再按长度截断：大文件若把 1500 字符预算全花在依赖声明上，
+     * 模型只能看到 import 而看不到方法体，就答不出「请求方式与参数」这类问题。
+     * 只对超限片段生效，小文件仍原样注入。
+     */
+    private String truncateSnippet(String snippet) {
+        String body = dropLeadingImports(snippet);
+        boolean importsDropped = body.length() != snippet.length();
+        boolean lengthTrimmed = body.length() > MAX_SNIPPET_IN_PROMPT;
+        if (lengthTrimmed) {
+            body = body.substring(0, MAX_SNIPPET_IN_PROMPT);
+        }
+        if (importsDropped && lengthTrimmed) {
+            return body + "\n...(开头 package/import 声明已省略，其余已按长度截断)";
+        }
+        if (importsDropped) {
+            return body + "\n...(开头 package/import 声明已省略)";
+        }
+        return body + "\n...(已截断)";
+    }
+
+    /** 丢掉文件开头连续的 package / import / 空行，保留其后的注释、注解与类声明 */
+    private String dropLeadingImports(String snippet) {
+        int index = 0;
+        int length = snippet.length();
+        while (index < length) {
+            int lineEnd = snippet.indexOf('\n', index);
+            if (lineEnd < 0) {
+                lineEnd = length;
+            }
+            String line = snippet.substring(index, lineEnd).trim();
+            if (line.isEmpty() || line.startsWith("package ") || line.startsWith("package\t")
+                    || line.startsWith("import ") || line.startsWith("import\t")) {
+                index = lineEnd + 1;
+                continue;
+            }
+            break;
+        }
+        return index >= length ? snippet : snippet.substring(index);
     }
 }
