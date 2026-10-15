@@ -49,6 +49,47 @@
           </el-input>
         </el-form-item>
 
+        <el-form-item v-if="isRegister" prop="inviteCode">
+          <el-input
+              v-model="form.inviteCode"
+              maxlength="8"
+              placeholder="邀请码（向已有用户获取）"
+              size="large"
+              @input="form.inviteCode = form.inviteCode.toUpperCase()"
+          >
+            <template #prefix>
+              <el-icon>
+                <Key/>
+              </el-icon>
+            </template>
+          </el-input>
+        </el-form-item>
+
+        <el-form-item v-if="!isRegister && showCaptcha" prop="captchaCode">
+          <div class="captcha-row">
+            <el-input
+                v-model="form.captchaCode"
+                maxlength="4"
+                placeholder="请输入验证码"
+                size="large"
+                @input="form.captchaCode = form.captchaCode.toUpperCase()"
+            >
+              <template #prefix>
+                <el-icon>
+                  <Picture/>
+                </el-icon>
+              </template>
+            </el-input>
+            <button
+                type="button"
+                class="captcha-image"
+                aria-label="刷新验证码"
+                @click="refreshCaptcha"
+                v-html="captchaSvg"
+            ></button>
+          </div>
+        </el-form-item>
+
         <el-form-item v-if="isRegister" prop="nickname">
           <el-input
               v-model="form.nickname"
@@ -98,18 +139,25 @@
 import {computed, onMounted, reactive, ref} from 'vue'
 import {useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
-import {login, register} from '@/api'
+import {getCaptcha, login, register} from '@/api'
+import {Key, Picture} from '@element-plus/icons-vue'
 
 const router = useRouter()
 const formRef = ref(null)
 const loading = ref(false)
 const isRegister = ref(false)
 const showPassword = ref(false)
+const showCaptcha = ref(false)
+const failCount = ref(0)
+const captchaId = ref('')
+const captchaSvg = ref('')
 
 const form = reactive({
   username: '',
   password: '',
-  nickname: ''
+  nickname: '',
+  inviteCode: '',
+  captchaCode: ''
 })
 
 const rules = computed(() => ({
@@ -121,6 +169,26 @@ const rules = computed(() => ({
     {required: true, message: '请输入密码', trigger: 'blur'},
     {min: 6, max: 32, message: '密码长度应为 6-32 位', trigger: 'blur'}
   ],
+  inviteCode: isRegister.value
+      ? [
+        {
+          validator: (_rule, value, callback) => {
+            if (!value || /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/.test(value)) {
+              callback()
+            } else {
+              callback(new Error('邀请码为 8 位大写字母或数字'))
+            }
+          },
+          trigger: 'blur'
+        }
+      ]
+      : [],
+  captchaCode: !isRegister.value && showCaptcha.value
+      ? [
+        {required: true, message: '请输入验证码', trigger: 'blur'},
+        {pattern: /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}$/, message: '验证码格式不正确', trigger: 'blur'}
+      ]
+      : [],
   nickname: isRegister.value
       ? [{max: 32, message: '昵称最长 32 位', trigger: 'blur'}]
       : []
@@ -129,7 +197,22 @@ const rules = computed(() => ({
 function toggleMode(toRegister) {
   isRegister.value = toRegister
   showPassword.value = false
+  if (toRegister) {
+    form.captchaCode = ''
+  }
   formRef.value && formRef.value.clearValidate()
+}
+
+async function refreshCaptcha() {
+  try {
+    const res = await getCaptcha({_t: Date.now()})
+    captchaId.value = res.data.captchaId
+    captchaSvg.value = res.data.svg
+    form.captchaCode = ''
+  } catch {
+    captchaId.value = ''
+    captchaSvg.value = ''
+  }
 }
 
 function persistLogin(data) {
@@ -186,17 +269,41 @@ const handleSubmit = async () => {
     if (isRegister.value && form.nickname.trim()) {
       payload.nickname = form.nickname.trim()
     }
+    if (isRegister.value) {
+      payload.inviteCode = form.inviteCode.trim().toUpperCase()
+    } else if (showCaptcha.value) {
+      payload.captchaId = captchaId.value
+      payload.captchaCode = form.captchaCode.trim().toUpperCase()
+    }
 
     const res = isRegister.value
         ? await register(payload)
         : await login(payload)
     const data = res.data
 
+    failCount.value = 0
+    showCaptcha.value = false
+    captchaId.value = ''
+    captchaSvg.value = ''
     persistLogin(data)
     ElMessage.success(`${isRegister.value ? '注册成功，' : ''}欢迎，${data.nickname}`)
     router.push('/')
   } catch (error) {
     // 校验失败或接口失败（接口错误由拦截器统一提示）
+    if (!isRegister.value) {
+      const backendFailCount = Number(error?.data?.failCount || 0)
+      if (error?.code === 4001 || error?.data?.needCaptcha) {
+        failCount.value = Math.max(failCount.value, backendFailCount, 5)
+        showCaptcha.value = true
+        await refreshCaptcha()
+      } else if (error?.message?.includes('账号或密码错误')) {
+        failCount.value += 1
+        if (failCount.value >= 5) {
+          showCaptcha.value = true
+          await refreshCaptcha()
+        }
+      }
+    }
     if (error && error.message) {
       console.error(isRegister.value ? '注册错误:' : '登录错误:', error)
     }
@@ -322,6 +429,36 @@ onMounted(() => {
 
 .pwd-toggle:hover {
   color: var(--primary-light);
+}
+
+.captcha-row {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.captcha-row .el-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.captcha-image {
+  width: 120px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-light);
+  overflow: hidden;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.captcha-image :deep(svg) {
+  display: block;
+  width: 120px;
+  height: 42px;
 }
 
 .submit-btn {

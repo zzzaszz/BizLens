@@ -52,6 +52,11 @@
             <span>个人知识库</span>
           </el-menu-item>
 
+          <el-menu-item index="/profile">
+            <el-icon><User /></el-icon>
+            <span>个人中心</span>
+          </el-menu-item>
+
         </el-menu>
       </el-scrollbar>
 
@@ -93,6 +98,14 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item @click="router.push('/profile')">
+                  <el-icon><User /></el-icon>
+                  个人中心
+                </el-dropdown-item>
+                <el-dropdown-item @click="openInviteDialog">
+                  <el-icon><Tickets /></el-icon>
+                  我的邀请码
+                </el-dropdown-item>
                 <el-dropdown-item divided :disabled="isLoggingOut" @click="handleLogout">
                   <el-icon v-if="isLoggingOut" class="is-loading"><Loading /></el-icon>
                   {{ isLoggingOut ? '退出中...' : '退出登录' }}
@@ -109,6 +122,74 @@
         </router-view>
       </el-main>
     </el-container>
+
+    <el-dialog
+      v-model="inviteDialogVisible"
+      title="我的邀请码"
+      width="680px"
+      destroy-on-close
+    >
+      <div class="invite-toolbar">
+        <span class="invite-hint">未使用邀请码最多保留 5 个</span>
+        <el-button
+          type="primary"
+          :loading="inviteCreating"
+          :disabled="activeInviteCount >= 5"
+          @click="handleCreateInvite"
+        >
+          <el-icon><Plus /></el-icon>
+          生成邀请码
+        </el-button>
+      </div>
+
+      <el-table
+        v-loading="inviteLoading"
+        :data="inviteCodes"
+        size="small"
+        empty-text="暂无邀请码"
+      >
+        <el-table-column prop="code" label="邀请码" min-width="130">
+          <template #default="{ row }">
+            <code>{{ row.code }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="inviteStatusType(row.status)" size="small">
+              {{ inviteStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="过期时间" min-width="165">
+          <template #default="{ row }">{{ formatDate(row.expireAt) }}</template>
+        </el-table-column>
+        <el-table-column label="使用者" min-width="120">
+          <template #default="{ row }">{{ row.usedByUsername || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              text
+              type="primary"
+              :disabled="row.status !== 0"
+              @click="copyInviteCode(row.code)"
+            >
+              <el-icon><CopyDocument /></el-icon>
+              复制
+            </el-button>
+            <el-button
+              text
+              type="danger"
+              :disabled="row.status !== 0"
+              @click="handleRevokeInvite(row)"
+            >
+              <el-icon><Delete /></el-icon>
+              作废
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </el-container>
 </template>
 
@@ -125,9 +206,14 @@ import {
   Fold,
   FolderOpened,
   HomeFilled,
-  Loading
+  Loading,
+  Tickets,
+  User,
+  Plus,
+  CopyDocument,
+  Delete
 } from '@element-plus/icons-vue'
-import {logout} from '@/api'
+import {createInviteCode, listInviteCodes, logout, revokeInviteCode} from '@/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -135,6 +221,15 @@ const isCollapsed = ref(false)
 const isLoggingOut = ref(false)
 const isMobile = ref(false)
 const mobileDrawerOpen = ref(false)
+const inviteDialogVisible = ref(false)
+const inviteLoading = ref(false)
+const inviteCreating = ref(false)
+const inviteCodes = ref([])
+const userInfoVersion = ref(0)
+
+const refreshUserInfo = () => {
+  userInfoVersion.value += 1
+}
 
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
@@ -146,10 +241,12 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  window.addEventListener('user-info-updated', refreshUserInfo)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', checkMobile)
+  window.removeEventListener('user-info-updated', refreshUserInfo)
 })
 
 const sidebarWidth = computed(() => {
@@ -160,6 +257,7 @@ const sidebarWidth = computed(() => {
 })
 
 const userName = computed(() => {
+  userInfoVersion.value
   try {
     const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}')
     return userInfo.nickname || '未登录'
@@ -180,6 +278,7 @@ const currentMenu = computed(() => {
     '/ai/agents': 'AI 角色',
     '/projects': '代码项目',
     '/knowledge': '个人知识库',
+    '/profile': '个人中心',
   }
   return pathMap[path] || ''
 })
@@ -194,6 +293,86 @@ const handleCollapseKey = () => {
   } else {
     toggleCollapse()
   }
+}
+
+const activeInviteCount = computed(() => {
+  return inviteCodes.value.filter(item => item.status === 0).length
+})
+
+const openInviteDialog = async () => {
+  inviteDialogVisible.value = true
+  await loadInviteCodes()
+}
+
+const loadInviteCodes = async () => {
+  inviteLoading.value = true
+  try {
+    const res = await listInviteCodes()
+    inviteCodes.value = Array.isArray(res.data) ? res.data : []
+  } finally {
+    inviteLoading.value = false
+  }
+}
+
+const handleCreateInvite = async () => {
+  if (activeInviteCount.value >= 5) {
+    ElMessage.warning('未使用的邀请码已达到上限')
+    return
+  }
+  inviteCreating.value = true
+  try {
+    const res = await createInviteCode()
+    const code = res.data?.code
+    if (code) {
+      await loadInviteCodes()
+      await copyInviteCode(code)
+      ElMessage.success(`邀请码 ${code} 已生成并复制`)
+    }
+  } finally {
+    inviteCreating.value = false
+  }
+}
+
+const handleRevokeInvite = async (row) => {
+  try {
+    await revokeInviteCode(row.id)
+    await loadInviteCodes()
+    ElMessage.success('邀请码已作废')
+  } catch {
+    // 请求拦截器负责显示服务端错误
+  }
+}
+
+const copyInviteCode = async (code) => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(code)
+    } else {
+      const input = document.createElement('textarea')
+      input.value = code
+      input.style.position = 'fixed'
+      input.style.opacity = '0'
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      input.remove()
+    }
+  } catch {
+    ElMessage.warning('复制失败，请手动复制邀请码')
+  }
+}
+
+const inviteStatusText = status => {
+  return {0: '未使用', 1: '已使用', 2: '已作废', 3: '已过期'}[status] || '未知'
+}
+
+const inviteStatusType = status => {
+  return {0: 'success', 1: 'info', 2: 'danger', 3: 'warning'}[status] || 'info'
+}
+
+const formatDate = value => {
+  if (!value) return '-'
+  return String(value).replace('T', ' ').slice(0, 19)
 }
 
 const handleLogout = async () => {
@@ -493,6 +672,29 @@ const handleLogout = async () => {
   font-weight: 500;
 }
 
+.invite-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.invite-hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.invite-toolbar :deep(.el-button .el-icon) {
+  margin-right: 4px;
+}
+
+.invite-toolbar + :deep(.el-table) code {
+  color: var(--text-primary);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
 /* ============ 主内容 ============ */
 .main-content {
   background: var(--bg-color);
@@ -566,6 +768,11 @@ const handleLogout = async () => {
 
   .main-content {
     padding: 12px;
+  }
+
+  .invite-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

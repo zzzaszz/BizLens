@@ -101,7 +101,10 @@ request.interceptors.response.use(
       // 403 无权限（管理员接口），提示后拒绝
       if (res.code === 403) {
           ElMessage.error(res.msg || '无权限访问')
-          return Promise.reject(new Error(res.msg || '无权限访问'))
+          const err = new Error(res.msg || '无权限访问')
+          err.code = res.code
+          err.data = res.data
+          return Promise.reject(err)
       }
 
     // token 无效相关错误，直接跳转登录页
@@ -114,7 +117,10 @@ request.interceptors.response.use(
 
     // 其他错误
     ElMessage.error(res.msg || '请求失败')
-    return Promise.reject(new Error(res.msg || '请求失败'))
+    const err = new Error(res.msg || '请求失败')
+    err.code = res.code
+    err.data = res.data
+    return Promise.reject(err)
   },
   async (error) => {
     // HTTP 401 状态码

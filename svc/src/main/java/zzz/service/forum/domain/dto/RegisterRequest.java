@@ -24,4 +24,9 @@ public class RegisterRequest {
      * 设备标识（可选）
      */
     private String deviceId;
+
+    /**
+     * 邀请码（启用邀请码注册时必填）
+     */
+    private String inviteCode;
 }

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="zzz.service.forum.mapper.AiInviteCodeMapper">
+
+    <insert id="insert">
+        INSERT INTO ai_invite_code
+            (id, code, created_by, status, expire_at)
+        VALUES
+            (#{id}, #{code}, #{createdBy}, #{status}, #{expireAt})
+    </insert>
+
+    <select id="countActiveByCreator" resultType="long">
+        SELECT COUNT(1)
+        FROM ai_invite_code
+        WHERE created_by = #{createdBy}
+          AND status = 0
+          AND expire_at &gt; CURRENT_TIMESTAMP
+    </select>
+
+    <select id="listByCreator" resultType="zzz.service.forum.domain.dto.InviteCodeView">
+        SELECT c.id,
+               c.code,
+               CASE
+                   WHEN c.status = 0 AND c.expire_at &lt;= CURRENT_TIMESTAMP THEN 3
+                   ELSE c.status
+               END AS status,
+               (c.status = 0 AND c.expire_at &lt;= CURRENT_TIMESTAMP) AS expired,
+               c.expire_at,
+               c.used_at,
+               c.created_at,
+               c.used_by,
+               u.Username AS used_by_username
+        FROM ai_invite_code c
+        LEFT JOIN "User" u ON u.Id = c.used_by
+        WHERE c.created_by = #{createdBy}
+        ORDER BY c.created_at DESC
+    </select>
+
+    <update id="claim">
+        UPDATE ai_invite_code
+        SET status = 1,
+            used_by = #{usedBy},
+            used_at = CURRENT_TIMESTAMP
+        WHERE code = #{code}
+          AND status = 0
+          AND expire_at &gt; CURRENT_TIMESTAMP
+    </update>
+
+    <update id="revoke">
+        UPDATE ai_invite_code
+        SET status = 2
+        WHERE id = #{id}
+          AND created_by = #{createdBy}
+          AND status = 0
+          AND expire_at &gt; CURRENT_TIMESTAMP
+    </update>
+
+</mapper>

@@ -45,6 +45,7 @@ public class AuthAspect {
             "/api/auth/register",
             "/api/auth/refresh",
             "/api/auth/logout",
+            "/api/auth/captcha",
             "/api/system/health"
     ));
 

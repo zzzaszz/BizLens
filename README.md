@@ -4,7 +4,7 @@ BizLens AI 是面向企业代码知识库的业务问答系统。系统通过 AI
 
 ## 当前能力
 
-- 用户注册、登录、JWT 会话和 Redis 限流
+- 用户注册、登录、JWT 会话和 Redis 限流；邀请码注册、登录失败累计与图形验证码
 - AI 会话、历史消息、SSE 对话和 AI 角色管理
 - 会话历史可回溯、可续聊：列表返回全部状态（含已关闭），已关闭会话能翻回来看历史，发送消息时自动重新打开继续
 - 回答按 Markdown 渲染（自带轻量渲染器，先转义再套标签，不引第三方库）；首字未到时显示「思考中」实时计时，结束后给出「思考 x.xs ·
@@ -59,6 +59,7 @@ docs/    项目开发文档与开发日志
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-sourcesnippet.sql  # ai_code_chunk.source_snippet
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20260914-indexerror.sql     # ai_code_project.last_error
    psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20261008-index-started-at.sql # 每个项目独立索引开始时间
+   psql "$DATABASE_URL" -f svc/src/main/resources/db/migration-20261015-invite-code.sql     # 邀请码注册
    ```
 
    可选增强（数据库允许安装扩展时执行；失败会输出 NOTICE，不影响关键词召回）：
@@ -85,6 +86,12 @@ docs/    项目开发文档与开发日志
    REDIS_PASSWORD=
    AES_KEY=at-least-32-byte-secret
    JWT_SECRET=at-least-32-byte-jwt-secret
+   AUTH_INVITE_ENABLED=true
+   AUTH_CAPTCHA_ENABLED=true
+   AUTH_TRUSTED_PROXY_IPS=
+   AUTH_LOGIN_FAIL_THRESHOLD=5
+   AUTH_LOGIN_FAIL_TTL_SECONDS=2592000
+   AUTH_INVITE_EXPIRE_DAYS=7
    AI_EMBEDDING_ENABLED=false
    AI_EMBEDDING_BASE_URL=
    AI_EMBEDDING_API_KEY=
@@ -96,6 +103,9 @@ docs/    项目开发文档与开发日志
    AI_INDEX_MAX_FILE_BYTES=2097152
    AI_INDEX_RELATION_MAX_PAIRS=5000000
    ```
+
+   `AUTH_TRUSTED_PROXY_IPS` 只填写实际反向代理的来源 IP；留空时服务端忽略客户端提交的
+   `X-Forwarded-For`。已有部署可先将 `AUTH_INVITE_ENABLED=false`，执行迁移并确认前后端版本后再开启。
 
    启用语义召回时需要先执行 `migration-20261008-pgvector.sql`，并保证 `AI_EMBEDDING_DIMENSION` 与脚本中的 `VECTOR(1536)` 一致。
    如果数据库不允许安装 `pgvector` 扩展，脚本会跳过向量列与索引，系统继续使用关键词召回；不要开启 `AI_EMBEDDING_ENABLED` 即可。

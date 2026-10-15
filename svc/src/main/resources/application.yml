@@ -24,6 +24,15 @@ mybatis:
     map-underscore-to-camel-case: true
   type-aliases-package: zzz.service.**.domain
 
+# 登录安全增强。邀请码默认开启；已有部署可通过环境变量临时关闭后灰度启用。
+auth:
+  invite-enabled: ${AUTH_INVITE_ENABLED:true}
+  captcha-enabled: ${AUTH_CAPTCHA_ENABLED:true}
+  trusted-proxy-ips: ${AUTH_TRUSTED_PROXY_IPS:}
+  login-fail-threshold: ${AUTH_LOGIN_FAIL_THRESHOLD:5}
+  login-fail-ttl-seconds: ${AUTH_LOGIN_FAIL_TTL_SECONDS:2592000}
+  invite-expire-days: ${AUTH_INVITE_EXPIRE_DAYS:7}
+
 # ============ AI 对话配置（密钥走环境变量，不提交到 Git） ============
 ai:
   provider: deepseek

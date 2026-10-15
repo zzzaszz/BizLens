@@ -40,6 +40,11 @@ const routes = [
         name: 'KnowledgeSources',
         component: () => import('@/views/KnowledgeSources.vue')
       },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/views/Profile.vue')
+      },
     ]
   },
   // 404 处理

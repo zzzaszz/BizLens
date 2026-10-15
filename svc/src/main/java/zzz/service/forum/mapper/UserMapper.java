@@ -27,6 +27,11 @@ public interface UserMapper {
 
     User selectById(Long id);
 
+    /**
+     * 用户表总行数。用于判断全新库是否允许首个用户免邀请码注册。
+     */
+    long countUsers();
+
     // ============ 用户管理（后台） ============
 
     /**

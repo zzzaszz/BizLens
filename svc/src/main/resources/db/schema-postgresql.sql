@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS "User" (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username ON "User" (Username);
 CREATE INDEX IF NOT EXISTS idx_user_status ON "User" (Status, Deleted);
 
+CREATE TABLE IF NOT EXISTS ai_invite_code (
+    id         BIGINT PRIMARY KEY,
+    code       VARCHAR(16) NOT NULL,
+    created_by BIGINT NOT NULL REFERENCES "User" ("Id") ON DELETE CASCADE,
+    used_by    BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    status     SMALLINT NOT NULL DEFAULT 0 CHECK (status IN (0, 1, 2)),
+    expire_at  TIMESTAMP NOT NULL,
+    used_at    TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_invite_code ON ai_invite_code (code);
+CREATE INDEX IF NOT EXISTS idx_invite_creator ON ai_invite_code (created_by, status);
+
 -- 代码知识库：保存索引、摘要、元数据和受预算控制的源码片段；源码只作为受控召回上下文。
 -- 排在 "AiAgent" 之前，因为角色要外键引用它。
 CREATE TABLE IF NOT EXISTS ai_code_project (

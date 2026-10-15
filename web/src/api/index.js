@@ -9,8 +9,24 @@ export function register(data) {
   return request({url: '/api/auth/register', method: 'post', data})
 }
 
+export function getCaptcha(params) {
+  return request({url: '/api/auth/captcha', method: 'get', params})
+}
+
 export function logout(accessToken, refreshToken) {
   return request({url: '/api/auth/logout', method: 'post', data: {accessToken, refreshToken}})
+}
+
+export function createInviteCode() {
+  return request({url: '/api/auth/invite/create', method: 'post'})
+}
+
+export function listInviteCodes() {
+  return request({url: '/api/auth/invite/list', method: 'get'})
+}
+
+export function revokeInviteCode(id) {
+  return request({url: '/api/auth/invite/revoke', method: 'post', data: {id}})
 }
 
 export function getUserInfo() {

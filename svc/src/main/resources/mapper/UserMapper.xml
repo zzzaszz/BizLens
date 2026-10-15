@@ -41,6 +41,10 @@
           AND Deleted = 0 LIMIT 1
     </select>
 
+    <select id="countUsers" resultType="long">
+        SELECT COUNT(1) FROM "User"
+    </select>
+
     <insert id="insert">
         INSERT INTO "User" (Id, DeviceId, Username, PasswordHash, Nickname, Avatar, ThemeColor, Status, Role, LastLoginIp,
                           LastLoginAt, Deleted)

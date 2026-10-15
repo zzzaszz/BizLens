@@ -32,6 +32,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username
 CREATE INDEX IF NOT EXISTS idx_user_status
     ON "User" (Status, Deleted);
 
+CREATE TABLE IF NOT EXISTS ai_invite_code (
+    id         BIGINT PRIMARY KEY,
+    code       VARCHAR(16) NOT NULL,
+    created_by BIGINT NOT NULL REFERENCES "User" ("Id") ON DELETE CASCADE,
+    used_by    BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    status     SMALLINT NOT NULL DEFAULT 0 CHECK (status IN (0, 1, 2)),
+    expire_at  TIMESTAMP NOT NULL,
+    used_at    TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_invite_code
+    ON ai_invite_code (code);
+CREATE INDEX IF NOT EXISTS idx_invite_creator
+    ON ai_invite_code (created_by, status);
+
 -- Git code projects and indexing state.
 CREATE TABLE IF NOT EXISTS ai_code_project (
     id                     BIGINT PRIMARY KEY,

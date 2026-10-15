@@ -1,7 +1,9 @@
 package zzz.service.forum.service.impl;
 
 import com.alibaba.cloud.commons.lang.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import zzz.service.forum.domain.User;
 import zzz.service.forum.domain.dto.LoginRequest;
 import zzz.service.forum.domain.dto.RefreshRequest;
@@ -9,7 +11,10 @@ import zzz.service.forum.domain.dto.RegisterRequest;
 import zzz.service.forum.domain.vo.LoginResponse;
 import zzz.service.forum.mapper.UserMapper;
 import zzz.service.forum.service.AuthService;
+import zzz.service.forum.service.InviteCodeService;
 import zzz.service.forum.service.RedisService;
+import zzz.service.forum.utils.AuthBusinessException;
+import zzz.service.forum.utils.ClientIpResolver;
 import zzz.service.forum.utils.JwtUtils;
 import zzz.service.forum.utils.PasswordUtils;
 import zzz.service.forum.utils.SnowflakeIdGenerator;
@@ -28,6 +33,8 @@ public class AuthServiceImpl implements AuthService {
     private static final String REFRESH_TOKEN_KEY_PREFIX = "login:refresh:";
     private static final String LOGIN_RATE_LIMIT_PREFIX = "login:limit:";
     private static final String REGISTER_IP_PREFIX = "register:ip:";
+    private static final String LOGIN_FAIL_PREFIX = "login:fail:";
+    private static final String CAPTCHA_PREFIX = "login:captcha:";
 
     // 同IP每分钟最多登录 10 次
     private static final int LOGIN_MAX_TIMES = 10;
@@ -39,6 +46,7 @@ public class AuthServiceImpl implements AuthService {
 
     // 账号：3-32 位字母数字下划线
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[A-Za-z0-9_]{3,32}$");
+    private static final Pattern CAPTCHA_ID_PATTERN = Pattern.compile("^[A-Za-z0-9-]{16,64}$");
 
     @Resource
     private UserMapper userMapper;
@@ -49,34 +57,77 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private SnowflakeIdGenerator snowflakeIdGenerator;
 
+    @Resource
+    private InviteCodeService inviteCodeService;
+
+    @Value("${auth.invite-enabled:true}")
+    private boolean inviteEnabled;
+
+    @Value("${auth.captcha-enabled:true}")
+    private boolean captchaEnabled;
+
+    @Value("${auth.trusted-proxy-ips:}")
+    private String trustedProxyIps;
+
+    @Value("${auth.login-fail-threshold:5}")
+    private int loginFailCaptchaThreshold;
+
+    @Value("${auth.login-fail-ttl-seconds:2592000}")
+    private long loginFailTtlSeconds;
+
     @Override
     public LoginResponse login(LoginRequest request, HttpServletRequest httpServletRequest) {
         String ip = getIp(httpServletRequest);
 
         // IP 登录频次限制
         String rateKey = LOGIN_RATE_LIMIT_PREFIX + ip;
-        Long count = redisService.increment(rateKey, 1);
-        if (count == 1) {
-            redisService.expire(rateKey, LOGIN_RATE_LIMIT_SECONDS);
+        Long count = redisService.incrementWithInitialExpire(rateKey, 1, LOGIN_RATE_LIMIT_SECONDS);
+        if (count == null) {
+            throw new RuntimeException("服务暂时不可用，请稍后重试");
         }
         if (count > LOGIN_MAX_TIMES) {
             throw new RuntimeException("登录请求过于频繁，请稍后再试");
         }
 
-        String username = request.getUsername();
-        String password = request.getPassword();
+        String username = request == null ? null : normalizeUsername(request.getUsername());
+        String password = request == null ? null : request.getPassword();
         if (StringUtils.isBlank(username) || StringUtils.isBlank(password)) {
             throw new RuntimeException("账号或密码不能为空");
         }
+        if (!USERNAME_PATTERN.matcher(username).matches()) {
+            throw new RuntimeException("账号或密码错误");
+        }
 
         User user = userMapper.getByUsername(username);
+
+        String failKey = LOGIN_FAIL_PREFIX + username;
+        long failCount = readLong(redisService.getCacheObject(failKey));
+        if (captchaEnabled && failCount >= loginFailCaptchaThreshold) {
+            String captchaId = request.getCaptchaId();
+            String captchaCode = request.getCaptchaCode();
+            boolean validCaptcha = CAPTCHA_ID_PATTERN.matcher(
+                    captchaId == null ? "" : captchaId.trim()).matches()
+                    && StringUtils.isNotBlank(captchaCode)
+                    && redisService.consumeIfMatches(
+                    CAPTCHA_PREFIX + captchaId.trim(),
+                    captchaCode.trim().toUpperCase());
+            if (!validCaptcha) {
+                throw captchaException(failCount);
+            }
+        }
+
         // 账号不存在或密码不匹配，统一提示，避免账号枚举
         if (user == null || !PasswordUtils.matches(password, user.getPasswordHash())) {
+            if (user != null) {
+                redisService.incrementAndExpire(failKey, 1, loginFailTtlSeconds);
+            }
             throw new RuntimeException("账号或密码错误");
         }
         if (user.getStatus() != null && user.getStatus() == 2) {
             throw new RuntimeException("账号已被封禁");
         }
+
+        redisService.deleteObject(failKey);
 
         // 更新登录信息
         user.setLastLoginIp(ip);
@@ -87,11 +138,13 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public LoginResponse register(RegisterRequest request, HttpServletRequest httpServletRequest) {
         String ip = getIp(httpServletRequest);
 
         String username = request == null ? null : request.getUsername();
         String password = request == null ? null : request.getPassword();
+        username = normalizeUsername(username);
         if (StringUtils.isBlank(username) || StringUtils.isBlank(password)) {
             throw new RuntimeException("账号或密码不能为空");
         }
@@ -107,16 +160,6 @@ public class AuthServiceImpl implements AuthService {
             throw new RuntimeException("该账号已被注册");
         }
 
-        // IP 注册限制：同 IP 每天最多 5 个
-        String ipKey = REGISTER_IP_PREFIX + ip;
-        Long ipCount = redisService.increment(ipKey, 1);
-        if (ipCount == 1) {
-            redisService.expire(ipKey, REGISTER_LIMIT_SECONDS);
-        }
-        if (ipCount > IP_MAX_REGISTER) {
-            throw new RuntimeException("当前网络下注册次数已达上限，请明天再试");
-        }
-
         User user = new User();
         user.setId(snowflakeIdGenerator.nextId());
         // deviceId 未提供时用 username 占位，保证非空
@@ -130,7 +173,27 @@ public class AuthServiceImpl implements AuthService {
         user.setDeleted(0);
         user.setLastLoginIp(ip);
         user.setLastLoginAt(LocalDateTime.now());
-        userMapper.insert(user);
+
+        if (inviteEnabled && userMapper.countUsers() > 0) {
+            if (request == null || StringUtils.isBlank(request.getInviteCode())) {
+                throw new RuntimeException("注册需要邀请码");
+            }
+            inviteCodeService.claim(request.getInviteCode(), user.getId());
+        }
+
+        // IP 注册限制：同 IP 每天最多 5 个
+        String ipKey = REGISTER_IP_PREFIX + ip;
+        Long ipCount = redisService.incrementWithInitialExpire(ipKey, 1, REGISTER_LIMIT_SECONDS);
+        if (ipCount == null) {
+            throw new RuntimeException("服务暂时不可用，请稍后重试");
+        }
+        if (ipCount > IP_MAX_REGISTER) {
+            throw new RuntimeException("当前网络下注册次数已达上限，请明天再试");
+        }
+
+        if (userMapper.insert(user) != 1) {
+            throw new RuntimeException("注册失败，请稍后重试");
+        }
 
         return issueTokens(user);
     }
@@ -238,10 +301,30 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private String getIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (StringUtils.isBlank(ip)) {
-            ip = request.getRemoteAddr();
+        return ClientIpResolver.resolve(request, trustedProxyIps);
+    }
+
+    private String normalizeUsername(String username) {
+        return username == null ? null : username.trim();
+    }
+
+    private long readLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
         }
-        return ip;
+        if (value != null) {
+            try {
+                return Long.parseLong(String.valueOf(value));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0L;
+    }
+
+    private AuthBusinessException captchaException(long failCount) {
+        java.util.Map<String, Object> data = new java.util.HashMap<>();
+        data.put("needCaptcha", true);
+        data.put("failCount", failCount);
+        return new AuthBusinessException(4001, "请输入验证码", data);
     }
 }

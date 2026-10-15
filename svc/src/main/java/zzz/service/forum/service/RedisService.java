@@ -1,14 +1,31 @@
 package zzz.service.forum.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.ReturnType;
 import org.springframework.data.redis.core.*;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class RedisService {
+
+    private static final String INCREMENT_WITH_EXPIRE_SCRIPT =
+            "local value = redis.call('incrby', KEYS[1], ARGV[1]); " +
+                    "redis.call('expire', KEYS[1], ARGV[2]); return value";
+
+    private static final String INCREMENT_WITH_INITIAL_EXPIRE_SCRIPT =
+            "local value = redis.call('incrby', KEYS[1], ARGV[1]); " +
+                    "if value == tonumber(ARGV[1]) then redis.call('expire', KEYS[1], ARGV[2]); end; " +
+                    "return value";
+
+    private static final String CONSUME_IF_MATCH_SCRIPT =
+            "local value = redis.call('get', KEYS[1]); " +
+                    "redis.call('del', KEYS[1]); " +
+                    "if value and value == ARGV[1] then return 1 end; return 0";
+
     @Autowired
     @SuppressWarnings("rawtypes")
     private RedisTemplate redisTemplate;
@@ -166,6 +183,54 @@ public class RedisService {
      */
     public Long increment(String key, long delta) {
         return this.redisTemplate.opsForValue().increment(key, delta);
+    }
+
+    /**
+     * 原子递增并设置 TTL，避免 INCR 与 EXPIRE 之间进程退出留下永久键。
+     */
+    public Long incrementAndExpire(String key, long delta, long timeoutSeconds) {
+        return evalIncrementScript(INCREMENT_WITH_EXPIRE_SCRIPT, key, delta, timeoutSeconds);
+    }
+
+    /**
+     * 原子递增，并仅在新窗口第一次写入时设置 TTL，保持固定窗口限流语义。
+     */
+    public Long incrementWithInitialExpire(String key, long delta, long timeoutSeconds) {
+        return evalIncrementScript(INCREMENT_WITH_INITIAL_EXPIRE_SCRIPT, key, delta, timeoutSeconds);
+    }
+
+    private Long evalIncrementScript(String script, String key, long delta, long timeoutSeconds) {
+        byte[] keyBytes = redisTemplate.getKeySerializer().serialize(key);
+        byte[] deltaBytes = String.valueOf(delta).getBytes(StandardCharsets.UTF_8);
+        byte[] timeoutBytes = String.valueOf(timeoutSeconds).getBytes(StandardCharsets.UTF_8);
+        Object result = redisTemplate.execute((RedisCallback<Object>) connection ->
+                connection.eval(
+                        script.getBytes(StandardCharsets.UTF_8),
+                        ReturnType.INTEGER,
+                        1,
+                        keyBytes,
+                        deltaBytes,
+                        timeoutBytes
+                ));
+        return result == null ? null : ((Number) result).longValue();
+    }
+
+    /**
+     * 原子比较并消费一次性值。无论答案是否匹配，只要键存在就会被删除，
+     * 防止验证码并发重放。
+     */
+    public boolean consumeIfMatches(String key, String expected) {
+        byte[] keyBytes = redisTemplate.getKeySerializer().serialize(key);
+        byte[] expectedBytes = redisTemplate.getValueSerializer().serialize(expected);
+        Object result = redisTemplate.execute((RedisCallback<Object>) connection ->
+                connection.eval(
+                        CONSUME_IF_MATCH_SCRIPT.getBytes(StandardCharsets.UTF_8),
+                        ReturnType.INTEGER,
+                        1,
+                        keyBytes,
+                        expectedBytes
+                ));
+        return result != null && ((Number) result).longValue() == 1L;
     }
 
     /**
