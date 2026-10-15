@@ -113,10 +113,12 @@
           <el-table-column label="有效期" min-width="150">
             <template #default="{ row }">{{ formatDate(row.expireAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="126" fixed="right">
+          <el-table-column label="操作" width="172" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" :icon="CopyDocument" :disabled="row.status !== 0" @click="copyCode(row.code)">复制</el-button>
-              <el-button link type="danger" :icon="Delete" :disabled="row.status !== 0" @click="revokeCode(row)">作废</el-button>
+              <div class="invite-actions">
+                <el-button link type="primary" :icon="CopyDocument" :disabled="row.status !== 0" @click="copyCode(row.code)">复制</el-button>
+                <el-button link type="danger" :icon="Delete" :disabled="row.status !== 0" @click="revokeCode(row)">作废</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -177,10 +179,20 @@ const passwordRules = {
   ]
 }
 
+async function loadInviteCodes() {
+  inviteLoading.value = true
+  try {
+    const res = await listInviteCodes()
+    inviteCodes.value = Array.isArray(res.data) ? res.data : []
+  } finally {
+    inviteLoading.value = false
+  }
+}
+
 async function loadAll() {
   loading.value = true
   try {
-    const [userRes, inviteRes] = await Promise.all([getUserInfo(), listInviteCodes()])
+    const [userRes] = await Promise.all([getUserInfo(), loadInviteCodes()])
     Object.assign(userInfo, userRes.data || {})
     profileForm.nickname = userInfo.nickname || ''
     profileForm.themeColor = userInfo.themeColor || '#2563EB'
@@ -192,7 +204,6 @@ async function loadAll() {
       role: userInfo.role,
       themeColor: userInfo.themeColor
     }))
-    inviteCodes.value = Array.isArray(inviteRes.data) ? inviteRes.data : []
   } finally {
     loading.value = false
   }
@@ -317,6 +328,8 @@ h1 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; }
 .invite-hint { margin: 0 0 10px; }
 .invite-card :deep(.el-card__body) { padding-top: 12px; }
 .invite-card :deep(.el-table) { width: 100%; }
+.invite-actions { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
+.invite-actions :deep(.el-button + .el-button) { margin-left: 0; }
 code { color: var(--primary-dark); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 @media (max-width: 900px) {
   .profile-grid, .lower-grid { grid-template-columns: 1fr; }

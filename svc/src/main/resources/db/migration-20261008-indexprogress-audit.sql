@@ -11,7 +11,7 @@ ALTER TABLE IF EXISTS ai_knowledge_source ADD COLUMN IF NOT EXISTS index_current
 
 CREATE TABLE IF NOT EXISTS ai_security_audit (
     id              BIGINT PRIMARY KEY,
-    user_id         BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    user_id         BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     project_id      BIGINT REFERENCES ai_code_project (id) ON DELETE SET NULL,
     question        TEXT NOT NULL,
     retrieval_meta  JSONB NOT NULL DEFAULT '{}'::jsonb,

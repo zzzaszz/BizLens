@@ -32,11 +32,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username
 CREATE INDEX IF NOT EXISTS idx_user_status
     ON "User" (Status, Deleted);
 
+-- Default administrator account: admin / 123456.
+INSERT INTO "User" (
+    Id, DeviceId, Username, PasswordHash, Nickname, Avatar, ThemeColor,
+    Status, Role, Deleted
+)
+VALUES (
+    1,
+    'admin',
+    'admin',
+    'VGVuYW50QWRtaW5TZWVkIQ==:XYKHaSL54fk63fO2WuWBmUoh5fnPrXZlSmcQIzGV8go=',
+    'admin',
+    '',
+    '#2563EB',
+    1,
+    1,
+    0
+)
+ON CONFLICT (Username) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS ai_invite_code (
     id         BIGINT PRIMARY KEY,
     code       VARCHAR(16) NOT NULL,
-    created_by BIGINT NOT NULL REFERENCES "User" ("Id") ON DELETE CASCADE,
-    used_by    BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+     created_by BIGINT NOT NULL REFERENCES "User" (Id) ON DELETE CASCADE,
+     used_by    BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     status     SMALLINT NOT NULL DEFAULT 0 CHECK (status IN (0, 1, 2)),
     expire_at  TIMESTAMP NOT NULL,
     used_at    TIMESTAMP,

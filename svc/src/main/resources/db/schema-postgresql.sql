@@ -24,11 +24,30 @@ CREATE TABLE IF NOT EXISTS "User" (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_username ON "User" (Username);
 CREATE INDEX IF NOT EXISTS idx_user_status ON "User" (Status, Deleted);
 
+-- Default administrator account: admin / 123456.
+INSERT INTO "User" (
+    Id, DeviceId, Username, PasswordHash, Nickname, Avatar, ThemeColor,
+    Status, Role, Deleted
+)
+VALUES (
+    1,
+    'admin',
+    'admin',
+    'VGVuYW50QWRtaW5TZWVkIQ==:XYKHaSL54fk63fO2WuWBmUoh5fnPrXZlSmcQIzGV8go=',
+    'admin',
+    '',
+    '#2563EB',
+    1,
+    1,
+    0
+)
+ON CONFLICT (Username) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS ai_invite_code (
     id         BIGINT PRIMARY KEY,
     code       VARCHAR(16) NOT NULL,
-    created_by BIGINT NOT NULL REFERENCES "User" ("Id") ON DELETE CASCADE,
-    used_by    BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    created_by BIGINT NOT NULL REFERENCES "User" (Id) ON DELETE CASCADE,
+    used_by    BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     status     SMALLINT NOT NULL DEFAULT 0 CHECK (status IN (0, 1, 2)),
     expire_at  TIMESTAMP NOT NULL,
     used_at    TIMESTAMP,
@@ -61,7 +80,7 @@ CREATE TABLE IF NOT EXISTS ai_code_project (
     index_started_at TIMESTAMP,
     index_heartbeat_at TIMESTAMP,
     index_current_file VARCHAR(1024),
-    created_by      BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    created_by      BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -90,7 +109,7 @@ CREATE TABLE IF NOT EXISTS "AiAgent" (
     "ApiKeyEnc"    VARCHAR(512),
     "CreatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" ("Id") ON DELETE SET NULL
+    CONSTRAINT fk_ai_agent_user FOREIGN KEY ("UserId") REFERENCES "User" (Id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_agent_user ON "AiAgent" ("UserId", "Enabled");
 CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_agent_code_user ON "AiAgent" ("UserId", "Code") WHERE "Code" IS NOT NULL;
@@ -129,7 +148,7 @@ CREATE TABLE IF NOT EXISTS ai_knowledge_source (
     index_skipped_files INTEGER NOT NULL DEFAULT 0,
     index_heartbeat_at TIMESTAMP,
     index_current_file VARCHAR(1024),
-    created_by BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    created_by BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -180,7 +199,7 @@ CREATE TABLE IF NOT EXISTS "AiConversation" (
     "Status"         SMALLINT NOT NULL DEFAULT 1,
     "CreatedAt"      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "UpdatedAt"      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ai_conversation_user FOREIGN KEY ("UserId") REFERENCES "User" ("Id") ON DELETE CASCADE,
+    CONSTRAINT fk_ai_conversation_user FOREIGN KEY ("UserId") REFERENCES "User" (Id) ON DELETE CASCADE,
     CONSTRAINT fk_ai_conversation_agent FOREIGN KEY ("AgentId") REFERENCES "AiAgent" ("Id") ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_conversation_user ON "AiConversation" ("UserId", "Status", "UpdatedAt" DESC);
@@ -240,7 +259,7 @@ CREATE INDEX IF NOT EXISTS idx_code_relation_target ON ai_code_relation (target_
 
 CREATE TABLE IF NOT EXISTS ai_security_audit (
     id              BIGINT PRIMARY KEY,
-    user_id         BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+    user_id         BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     project_id      BIGINT REFERENCES ai_code_project (id) ON DELETE SET NULL,
     question        TEXT NOT NULL,
     retrieval_meta  JSONB NOT NULL DEFAULT '{}'::jsonb,

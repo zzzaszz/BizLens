@@ -4,8 +4,8 @@
 CREATE TABLE IF NOT EXISTS ai_invite_code (
     id         BIGINT PRIMARY KEY,
     code       VARCHAR(16) NOT NULL,
-    created_by BIGINT NOT NULL REFERENCES "User" ("Id") ON DELETE CASCADE,
-    used_by    BIGINT REFERENCES "User" ("Id") ON DELETE SET NULL,
+     created_by BIGINT NOT NULL REFERENCES "User" (Id) ON DELETE CASCADE,
+     used_by    BIGINT REFERENCES "User" (Id) ON DELETE SET NULL,
     status     SMALLINT NOT NULL DEFAULT 0,
     expire_at  TIMESTAMP NOT NULL,
     used_at    TIMESTAMP,
